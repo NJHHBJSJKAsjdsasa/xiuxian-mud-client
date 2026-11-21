@@ -2,7 +2,7 @@
 
 ```
 doc_id: C-04
-version: 1.0.0
+version: 2.0.0
 updated: 2026-11-21
 owns: 状态消费方式、渲染策略、时钟与倒计时、本地禁算清单
 depends_on: 服务端 05（P-MSG-02/04）、C-02
@@ -12,26 +12,26 @@ depends_on: 服务端 05（P-MSG-02/04）、C-02
 
 | 类别 | 帧 | 频率 | 客户端怎么用 |
 |---|---|---|---|
-| 全量角色 | `state` | 变更即推 | **整体替换**角色快照，不做字段级合并 |
-| 高频小量 | `vital` | 每秒 | 只更新血/气/修为/体力/打坐态，不触发整页重绘 |
-| 事件 | `log` | 随时 | 追加到日志列表；`lines[]` 逐行带 `k`（sys/nar/combat/good/bad） |
+| 全量角色 | `state` | 变更即推 | **整体替换** `AppState::player`，不做字段级合并 |
+| 高频小量 | `vital` | 每秒 | 只更新血/气/修为/体力/打坐态，不重绘整屏 |
+| 事件 | `log` | 随时 | 追加到环形缓冲；`lines[]` 逐行带 `k`（sys/nar/combat/good/bad） |
 | 地图 | `map` | 请求后 | `look` / `worldMap` / `move` 后回包，覆盖当前节点视图 |
 
 `state` 是全量快照，**不是增量**。背包、技能、装备、宗门、因果、功德、轮回都在里面；客户端不要自己拼"上一次 + 这次变化"。
 
 ## 2. 渲染策略
 
-- 收到 `state`：标脏 → rAF 里对比版本号，只重绘**当前可见**的面板。
-- 收到 `vital`：只更新状态条与打坐动画，不走整页 diff。
-- 日志：固定行高 + 窗口化（只渲染可视区 ± 50 行），上限 5 000 行，超出丢最早的。
-- 面板懒加载：首次打开才构建 DOM，关闭不销毁（保留滚动位置），超过 8 个面板再做 LRU。
+- 收到 `state`：只更新数据并把 `dirty` 置位；`ui::draw` 每帧读取当前状态，不保留组件树。
+- 收到 `vital`：只更新状态条与打坐动画；不触发日志重排。
+- 日志：`VecDeque<Line>` 上限 5 000 行，超出 `pop_front`；只渲染可视区附近的行。
+- 面板：标签页按需构建内容（每次 `draw` 现算，不做跨帧缓存）；表格行数超过一屏时按可视区裁剪。
 
 ## 3. 时钟与倒计时
 
-- `offset = ready.serverNow - Date.now()`；之后统一 `serverNow() = Date.now() + offset`。
-- 赶路：`travel.arriveAt` 是服务端毫秒时间戳，倒计时 = `arriveAt - serverNow()`；到点后**不要自行切换界面**，等 `state` / `log` 的到达帧，避免和服务端判定的到达时刻错位。
+- `offset = ready.server_now - now_ms()`；之后统一 `server_now() = now_ms() + offset`。
+- 赶路：`travel.arrive_at` 是服务端毫秒时间戳，倒计时 = `arrive_at - server_now()`；到点后**不要自行切换界面**，等 `state` / `log` 的到达帧。
 - 秘境每层限时、实时切磋每回合 15 秒：同样以服务端给的 `deadline` 为准。
-- 页面从后台切回前台时，先校一次 offset（`ready` 里没有就忽略），再刷新倒计时。
+- 系统休眠/终端被挂起后恢复：`now_ms()` 会跳变，倒计时自然重算；不要把"经过的秒数"累加。
 
 ## 4. 本地禁算清单
 
@@ -57,3 +57,9 @@ depends_on: 服务端 05（P-MSG-02/04）、C-02
 1. `vital` 只覆盖它自己带的字段，且**带上服务端时间戳**（若有）才覆盖更旧的值。
 2. 没有时间戳时，以到达顺序为准：后到者胜。
 3. `ready` 永远最优先：它是重连后的权威快照，到达即清空待合并队列。
+
+## 7. Rust 落点
+
+- `AppState` 持有 `player: PlayerView`、`world: WorldView`、`fight: FightView`、`social: SocialView`；各子结构各自带 `revision: u64`，`ui` 只比较它决定是否重排某块。
+- 帧解析失败（`serde_json::Error`）不 panic：记 `tracing::warn!`、把原始帧写进 `logs/decode.log`，然后继续读下一帧。
+- 所有时间戳用 `i64` 毫秒（与服务端一致），不引 `chrono` 除非要做日期展示；切日/赛季只需格式化，可用 `time` crate 的轻量格式化。
