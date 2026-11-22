@@ -203,6 +203,9 @@ pub struct MapView {
     pub region: String,
     pub region_name: String,
     pub terrain: String,
+    /// 节点地图坐标（内容表排布，仅供画舆图）；老服务端不下发则为 None。
+    pub x: Option<i32>,
+    pub y: Option<i32>,
     pub grade: Option<String>,
     #[serde(default, deserialize_with = "null_as_default")]
     pub path: Vec<String>,
@@ -244,6 +247,9 @@ pub struct ExitView {
     pub name: Option<String>,
     pub terrain: String,
     pub cost_sec: i64,
+    /// 目标节点的地图坐标；老服务端不下发则为 None。
+    pub x: Option<i32>,
+    pub y: Option<i32>,
     pub cond: Option<String>,
     pub ok: bool,
     pub crowd: Option<String>,

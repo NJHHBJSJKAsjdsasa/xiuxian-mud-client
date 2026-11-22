@@ -30,7 +30,7 @@ pub fn show(ctx: &egui::Context, st: &mut UiState, app: &AppState, out: &mut Vec
             Page::Social => page_stub(ui, "江湖", "好友 · 师徒 · 道侣 · 仇敌 · 盟约 · 队伍", "M3"),
             Page::Market => page_stub(ui, "坊市", "挂单 · 我的 · 成交 · 曲线 · 拍卖 · 书信", "M3"),
             Page::Sect => sect_page(ui, app),
-            Page::Map => map_page(ui, app),
+            Page::Map => map_page(ui, st, app, out),
             Page::Settings => settings_page(ui, st, app, out),
         });
 }
@@ -835,7 +835,7 @@ fn sect_page(ui: &mut egui::Ui, app: &AppState) {
     });
 }
 
-fn map_page(ui: &mut egui::Ui, app: &AppState) {
+fn map_page(ui: &mut egui::Ui, st: &mut UiState, app: &AppState, out: &mut Vec<Intent>) {
     let Some(m) = app.world.get() else {
         page_stub(ui, "舆图", "尚未载入地貌", "M1");
         return;
@@ -845,28 +845,11 @@ fn map_page(ui: &mut egui::Ui, app: &AppState) {
         "舆图",
         &format!("{} · {}", m.region_name, m.path.join(" / ")),
     );
-    ui.label(RichText::new("相邻节点").size(12.0).color(theme::FAINT));
-    ui.add_space(4.0);
-    for ex in &m.exits {
-        ui.horizontal(|ui| {
-            ui.label(
-                RichText::new(ex.name.clone().unwrap_or_else(|| "雾中".into()))
-                    .size(13.0)
-                    .color(if ex.ok { theme::TEXT } else { theme::FAINT }),
-            );
-            ui.label(
-                RichText::new(format!("{} · {}s", terrain_name(&ex.terrain), ex.cost_sec))
-                    .size(11.0)
-                    .color(theme::DIM),
-            );
-        });
+    if let Some((to, walkable)) = ui::mapview::show(ui, &app.map_graph, &m.loc, &mut st.map_view)
+        && walkable
+    {
+        out.push(Intent::Move(to));
     }
-    ui.add_space(12.0);
-    ui.label(
-        RichText::new("节点拓扑图在 M5 用自绘画布实现；当前只列相邻关系。")
-            .size(11.0)
-            .color(theme::FAINT),
-    );
 }
 
 fn settings_page(ui: &mut egui::Ui, st: &mut UiState, app: &AppState, out: &mut Vec<Intent>) {

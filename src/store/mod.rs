@@ -2,10 +2,12 @@
 //! 这里不出现任何 `egui` 类型。
 
 pub mod logbuf;
+pub mod mapgraph;
 pub mod player;
 pub mod world;
 
 pub use logbuf::LogBuf;
+pub use mapgraph::MapGraph;
 pub use player::PlayerState;
 pub use world::WorldState;
 
@@ -27,6 +29,8 @@ pub struct AppState {
     pub logs: LogBuf,
     pub chats: Vec<ChatMsg>,
     pub battle: Option<BattleView>,
+    /// 已探索的节点与边（客户端累积，服务端只给相邻关系）。
+    pub map_graph: MapGraph,
     /// `server_now - local_now`，毫秒。
     pub clock_offset: i64,
     pub server_season: String,
@@ -45,6 +49,7 @@ impl Default for AppState {
             logs: LogBuf::new(5000),
             chats: Vec::new(),
             battle: None,
+            map_graph: MapGraph::default(),
             clock_offset: 0,
             server_season: String::new(),
             server_daypart: String::new(),
@@ -94,6 +99,7 @@ impl AppState {
     }
 
     pub fn apply_map(&mut self, m: &MapView) {
+        self.map_graph.observe(m);
         // `look` 的应答是单节点视图（exits 为空），不能拿它覆盖当前节点的出口，
         // 否则看一眼四周就把路全看没了。
         if let Some(old) = self.world.get()

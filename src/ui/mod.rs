@@ -2,6 +2,7 @@
 
 pub mod fonts;
 pub mod logview;
+pub mod mapview;
 pub mod scene;
 pub mod theme;
 pub mod views;
@@ -126,6 +127,8 @@ pub struct UiState {
     pub ui_scale: f32,
     pub fatal: String,
     pub font_source: String,
+    /// 舆图的平移与缩放。
+    pub map_view: mapview::MapUiState,
 }
 
 impl Default for UiState {
@@ -145,6 +148,7 @@ impl Default for UiState {
             ui_scale: 1.0,
             fatal: String::new(),
             font_source: String::new(),
+            map_view: mapview::MapUiState::default(),
         }
     }
 }

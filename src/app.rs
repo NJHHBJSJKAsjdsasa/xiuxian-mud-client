@@ -26,9 +26,11 @@ pub struct ClientApp {
     pending_login: Option<(String, String)>,
     /// 待自动建号的道号（`--create`）。
     pending_create: Option<String>,
-    /// `--snapshot <path>`：主界面稳定后抓一帧存 PNG 并退出。
+    /// `--page`：首次进入主界面时打开这一页（之后清空，不影响正常切页）。
+    preferred_page: Option<Page>,
+    /// `--snapshot <path>`：启动 5 秒后抓一帧存 PNG 并退出。
     snapshot_path: Option<std::path::PathBuf>,
-    snapshot_countdown: Option<u32>,
+    snapshot_frames: u32,
 }
 
 impl ClientApp {
@@ -74,8 +76,9 @@ impl ClientApp {
             submit_at: 0,
             pending_login: None,
             pending_create: None,
+            preferred_page: None,
             snapshot_path: None,
-            snapshot_countdown: None,
+            snapshot_frames: 0,
         }
     }
 
@@ -89,6 +92,22 @@ impl ClientApp {
     /// 开发/联调：登录后如果还没有角色，自动建号。
     pub fn auto_create(&mut self, name: String) {
         self.pending_create = Some(name);
+    }
+
+    /// 开发/联调：直接打开某一页（`game`/`character`/`bag`/`skills`/`social`/`market`/`sect`/`map`/`settings`）。
+    pub fn start_page(&mut self, name: &str) {
+        self.ui.page = match name {
+            "character" => Page::Character,
+            "bag" => Page::Bag,
+            "skills" => Page::Skills,
+            "social" => Page::Social,
+            "market" => Page::Market,
+            "sect" => Page::Sect,
+            "map" => Page::Map,
+            "settings" => Page::Settings,
+            _ => Page::Game,
+        };
+        self.preferred_page = Some(self.ui.page);
     }
 
     /// 开发/联调：主界面出来后抓一帧存 PNG，然后退出。
@@ -169,7 +188,8 @@ impl ClientApp {
                     View::Create
                 };
                 if r.has_character() {
-                    self.ui.page = Page::Game;
+                    // Ready 会重置到游戏页；`--page` 指定的页在这一步补回来。
+                    self.ui.page = self.preferred_page.take().unwrap_or(Page::Game);
                     self.ui.selected_exit = 0;
                     // ready 不带地图视图，主动拉一次当前节点。
                     let _ = self.tx.send(NetCmd::Act {
@@ -378,22 +398,13 @@ impl ClientApp {
         }
 
         let Some(_) = self.snapshot_path else { return };
-        if self.state.world.get().is_none() || self.ui.view != View::Main {
-            return;
-        }
-        let left = match &mut self.snapshot_countdown {
-            Some(n) => {
-                *n = n.saturating_sub(1);
-                *n
-            }
-            None => {
-                self.snapshot_countdown = Some(30);
-                30
-            }
-        };
-        if left == 0 {
+        // 不再等"主界面 + 地图都就绪"：按帧计数，5 秒后截当前画面。
+        // 自动登录通常 2 秒内就到主界面；登录页截图也能用。
+        self.snapshot_frames += 1;
+        if self.snapshot_frames >= 300 {
             ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
-            self.snapshot_countdown = Some(u32::MAX / 2); // 防止重复请求
+            self.snapshot_frames = 0;
+            self.snapshot_path = self.snapshot_path.take(); // 只截一次
         }
         ctx.request_repaint();
     }

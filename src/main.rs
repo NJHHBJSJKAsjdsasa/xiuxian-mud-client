@@ -22,6 +22,8 @@ struct Args {
     create: Option<String>,
     /// 开发/联调用：`--snapshot out.png`，主界面就绪后抓一帧并退出。
     snapshot: Option<String>,
+    /// 开发/联调用：`--page map`，启动后直接打开某一页（截图用）。
+    page: Option<String>,
 }
 
 fn parse_args() -> Args {
@@ -32,6 +34,7 @@ fn parse_args() -> Args {
         login: None,
         create: None,
         snapshot: None,
+        page: None,
     };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
@@ -47,6 +50,7 @@ fn parse_args() -> Args {
             }
             "--create" => a.create = it.next(),
             "--snapshot" => a.snapshot = it.next(),
+            "--page" => a.page = it.next(),
             "--log-level" => {
                 if let Some(v) = it.next() {
                     a.log_level = v;
@@ -137,6 +141,7 @@ fn main() -> eframe::Result {
     let login = args.login;
     let create = args.create;
     let snapshot = args.snapshot;
+    let page = args.page;
 
     eframe::run_native(
         "九州问道",
@@ -152,6 +157,9 @@ fn main() -> eframe::Result {
             }
             if let Some(path) = snapshot.clone() {
                 app.snapshot_to(path.into());
+            }
+            if let Some(p) = page.clone() {
+                app.start_page(&p);
             }
             Ok(Box::new(app))
         }),
