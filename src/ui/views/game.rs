@@ -264,22 +264,6 @@ fn character_panel(ctx: &egui::Context, st: &mut UiState, app: &AppState, out: &
                 }
             });
 
-            if let Some(t) = p.and_then(|p| p.travel.as_ref()) {
-                let left = t.arrive_at - app.server_now();
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("赶路").size(11.0).color(theme::FAINT));
-                    ui.label(
-                        RichText::new(format!(
-                            "{} · {}",
-                            t.name,
-                            crate::util::time::fmt_countdown(left)
-                        ))
-                        .size(12.0)
-                        .color(theme::ACCENT),
-                    );
-                });
-            }
-
             ui.add_space(10.0);
             ui.separator();
             ui.add_space(8.0);
@@ -441,8 +425,15 @@ fn game_page(ui: &mut egui::Ui, st: &mut UiState, app: &AppState, out: &mut Vec<
         scene_h,
     );
 
-    ui.add_space(8.0);
-    exits_row(ui, st, m, out);
+    ui.add_space(6.0);
+    travel_bar(ui, st, app);
+    ui.add_space(6.0);
+    let traveling = app
+        .player
+        .get()
+        .map(|p| p.travel.is_some())
+        .unwrap_or(false);
+    exits_row(ui, st, m, out, traveling);
 
     ui.add_space(6.0);
     ui.horizontal(|ui| {
@@ -494,6 +485,7 @@ fn exits_row(
     st: &mut UiState,
     m: &crate::protocol::msg::MapView,
     out: &mut Vec<Intent>,
+    traveling: bool,
 ) {
     ui.horizontal(|ui| {
         ui.label(
@@ -506,6 +498,13 @@ fn exits_row(
                 .size(11.0)
                 .color(theme::FAINT),
         );
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.label(
+                RichText::new("点一张就走 · 也可按 ↑↓ 选、Enter 确认")
+                    .size(10.5)
+                    .color(theme::FAINT),
+            );
+        });
     });
     ui.add_space(2.0);
     if m.exits.is_empty() {
@@ -531,7 +530,8 @@ fn exits_row(
                     .filter(|s| !s.is_empty())
                     .unwrap_or_else(|| "雾中".into());
                 let blocked = ex.blocked == Some(true);
-                let ok = ex.ok && !blocked;
+                // 赶路中所有出口都不可点：服务端也会拒，这里先拦一道。
+                let ok = ex.ok && !blocked && !traveling;
                 let mut sub = format!("{} · {}s", terrain_name(&ex.terrain), ex.cost_sec);
                 if let Some(fee) = ex.fee
                     && fee > 0
@@ -546,8 +546,15 @@ fn exits_row(
                     sub.push('·');
                     sub.push_str(&cond_text(cond));
                 }
+                // 有坐标就按真实方位给箭头，一眼知道往哪走。
+                let arrow = match (m.x, m.y, ex.x, ex.y) {
+                    (Some(cx), Some(cy), Some(tx), Some(ty)) => {
+                        format!("{} ", bearing_arrow(tx - cx, ty - cy))
+                    }
+                    _ => String::new(),
+                };
                 let color = if ok { theme::TEXT } else { theme::FAINT };
-                let text = RichText::new(format!("{name}\n{sub}"))
+                let text = RichText::new(format!("{arrow}{name}\n{sub}"))
                     .size(13.0)
                     .color(color);
                 let mut btn = egui::Button::new(text)
@@ -564,7 +571,18 @@ fn exits_row(
                 if ex.temp == Some(true) {
                     btn = btn.stroke(Stroke::new(1.0_f32, theme::WARN.linear_multiply(0.8)));
                 }
-                let resp = ui.add_enabled(ok, btn);
+                let resp = ui.add_enabled(ok, btn).on_hover_text(if ok {
+                    format!("前往 {} · 约 {} 秒", name, ex.cost_sec)
+                } else if traveling {
+                    "正在赶路，到了才能再走".to_string()
+                } else if blocked {
+                    "这条路断了".to_string()
+                } else {
+                    format!(
+                        "走不了：{}",
+                        ex.cond.as_deref().map(cond_text).unwrap_or_default()
+                    )
+                });
                 if resp.clicked() {
                     st.selected_exit = i;
                     out.push(Intent::Move(ex.to.clone()));
@@ -573,6 +591,55 @@ fn exits_row(
                     ui.end_row();
                 }
             }
+        });
+}
+
+/// 8 向箭头。服务端 y 向北为正，屏幕向上，所以直接用 dy 求角。
+fn bearing_arrow(dx: i32, dy: i32) -> &'static str {
+    if dx == 0 && dy == 0 {
+        return "·";
+    }
+    const ARROWS: [&str; 8] = ["→", "↗", "↑", "↖", "←", "↙", "↓", "↘"];
+    let ang = (dy as f32).atan2(dx as f32);
+    let idx = (ang / (std::f32::consts::PI / 4.0)).round() as i32;
+    ARROWS[idx.rem_euclid(8) as usize]
+}
+
+/// 赶路状态：放在场景正下方，比塞在右栏一行小字显眼。
+fn travel_bar(ui: &mut egui::Ui, st: &mut UiState, app: &AppState) {
+    let Some(t) = app.player.get().and_then(|p| p.travel.as_ref()) else {
+        return;
+    };
+    let left = t.arrive_at - app.server_now();
+    let _ = st;
+    egui::Frame::new()
+        .fill(Color32::from_rgb(0x18, 0x2A, 0x2A))
+        .stroke(Stroke::new(1.0_f32, theme::ACCENT.linear_multiply(0.7)))
+        .inner_margin(egui::Margin::symmetric(10, 6))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("→").size(15.0).color(theme::ACCENT));
+                ui.label(
+                    RichText::new(format!("正在赶往 {}", t.name))
+                        .size(13.0)
+                        .color(theme::TEXT),
+                );
+                ui.label(
+                    RichText::new("路上不能历练、交易")
+                        .size(10.5)
+                        .color(theme::FAINT),
+                );
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.label(
+                        RichText::new(crate::util::time::fmt_countdown(left))
+                            .size(14.0)
+                            .monospace()
+                            .color(theme::ACCENT),
+                    );
+                    ui.label(RichText::new("剩余").size(10.5).color(theme::FAINT));
+                });
+            });
         });
 }
 
@@ -1072,11 +1139,11 @@ fn terrain_name(t: &str) -> &str {
         "plain" => "平地",
         "road" => "官道",
         "trail" => "山径",
-        "forest" => "密林",
+        "woods" | "forest" => "密林",
         "bamboo" => "竹林",
         "river" => "河流",
         "lake" => "湖",
-        "spring" => "泉",
+        "spring" => "灵泉",
         "cliff" => "悬崖",
         "peak" => "峰顶",
         "slope" => "坡",

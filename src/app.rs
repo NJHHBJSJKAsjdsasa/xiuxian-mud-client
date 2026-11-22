@@ -28,6 +28,8 @@ pub struct ClientApp {
     pending_create: Option<String>,
     /// `--page`：首次进入主界面时打开这一页（之后清空，不影响正常切页）。
     preferred_page: Option<Page>,
+    /// `--move n`：拿到地图后自动走第 n 个出口（联调/截图用）。
+    pending_move: Option<usize>,
     /// `--snapshot <path>`：启动 5 秒后抓一帧存 PNG 并退出。
     snapshot_path: Option<std::path::PathBuf>,
     snapshot_frames: u32,
@@ -77,6 +79,7 @@ impl ClientApp {
             pending_login: None,
             pending_create: None,
             preferred_page: None,
+            pending_move: None,
             snapshot_path: None,
             snapshot_frames: 0,
         }
@@ -108,6 +111,11 @@ impl ClientApp {
             _ => Page::Game,
         };
         self.preferred_page = Some(self.ui.page);
+    }
+
+    /// 开发/联调：拿到地图后自动走第 n 个出口。
+    pub fn auto_move(&mut self, index: usize) {
+        self.pending_move = Some(index);
     }
 
     /// 开发/联调：主界面出来后抓一帧存 PNG，然后退出。
@@ -220,6 +228,15 @@ impl ClientApp {
             NetEvent::Map(m) => {
                 self.state.apply_map(&m);
                 self.ui.selected_exit = 0;
+                if let Some(i) = self.pending_move.take()
+                    && let Some(ex) = m.exits.get(i)
+                    && ex.ok
+                {
+                    let _ = self.tx.send(NetCmd::Act {
+                        a: action::MOVE.into(),
+                        d: serde_json::json!({ "to": ex.to }),
+                    });
+                }
             }
             NetEvent::Chat(c) => {
                 let head = match c.channel.as_str() {

@@ -24,6 +24,8 @@ struct Args {
     snapshot: Option<String>,
     /// 开发/联调用：`--page map`，启动后直接打开某一页（截图用）。
     page: Option<String>,
+    /// 开发/联调用：`--move 0`，进主界面后自动走第 n 个出口。
+    move_index: Option<usize>,
 }
 
 fn parse_args() -> Args {
@@ -35,6 +37,7 @@ fn parse_args() -> Args {
         create: None,
         snapshot: None,
         page: None,
+        move_index: None,
     };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
@@ -51,6 +54,7 @@ fn parse_args() -> Args {
             "--create" => a.create = it.next(),
             "--snapshot" => a.snapshot = it.next(),
             "--page" => a.page = it.next(),
+            "--move" => a.move_index = it.next().and_then(|v| v.parse().ok()),
             "--log-level" => {
                 if let Some(v) = it.next() {
                     a.log_level = v;
@@ -142,6 +146,7 @@ fn main() -> eframe::Result {
     let create = args.create;
     let snapshot = args.snapshot;
     let page = args.page;
+    let move_index = args.move_index;
 
     eframe::run_native(
         "九州问道",
@@ -160,6 +165,9 @@ fn main() -> eframe::Result {
             }
             if let Some(p) = page.clone() {
                 app.start_page(&p);
+            }
+            if let Some(i) = move_index {
+                app.auto_move(i);
             }
             Ok(Box::new(app))
         }),

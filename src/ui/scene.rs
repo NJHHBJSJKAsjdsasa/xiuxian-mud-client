@@ -228,7 +228,7 @@ fn draw_terrain(p: &egui::Painter, rect: Rect, terrain: &str) {
     p.add(Shape::mesh(mesh));
 
     match terrain {
-        "forest" | "bamboo" => {
+        "woods" | "forest" | "bamboo" => {
             let tree_count = if terrain == "bamboo" { 12 } else { 7 };
             for i in 0..tree_count {
                 let t = (i as f32 + 0.7) / tree_count as f32;

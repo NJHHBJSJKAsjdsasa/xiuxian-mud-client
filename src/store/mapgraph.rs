@@ -319,9 +319,9 @@ fn hash01(s: &str) -> f32 {
 /// 地形 → 单字标记，画在节点旁边。
 pub fn terrain_glyph(t: &str) -> &'static str {
     match t {
-        "forest" => "林",
+        "woods" | "forest" => "林",
         "bamboo" => "竹",
-        "river" | "lake" | "spring" => "水",
+        "river" | "lake" | "spring" => "泉",
         "cliff" | "peak" | "slope" | "valley" => "山",
         "town" => "镇",
         "gate" => "关",
