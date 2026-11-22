@@ -166,21 +166,21 @@ fn game_screen(ui: &mut egui::Ui, st: &mut UiState, app: &AppState, out: &mut Ve
     } else {
         scene::Pose::Standing
     };
-    scene::paint(
-        ui,
-        scene_rect,
-        &scene::Scene {
-            name: &m.name,
-            region: &m.region_name,
-            terrain: &m.terrain,
-            weather: m.weather.as_deref().unwrap_or(""),
-            daypart: m.daypart.as_deref().unwrap_or(""),
-            grade: m.grade.as_deref(),
-            desc: &m.desc,
-            explored: m.explored,
-        },
-        pose,
-    );
+    let sc = scene::Scene {
+        name: &m.name,
+        region: &m.region_name,
+        terrain: &m.terrain,
+        weather: m.weather.as_deref().unwrap_or(""),
+        daypart: m.daypart.as_deref().unwrap_or(""),
+        grade: m.grade.as_deref(),
+        desc: &m.desc,
+        explored: m.explored,
+    };
+    if theme::terminal() {
+        scene::paint_terminal(ui, scene_rect, &sc, pose);
+    } else {
+        scene::paint(ui, scene_rect, &sc, pose);
+    }
 
     // 场景到面板的过渡：一条由透明到面板色的渐变，避免硬接缝。
     let seam = Rect::from_min_max(
@@ -240,6 +240,24 @@ fn objective_card(ui: &mut egui::Ui, app: &AppState) {
         vec2(248.0, 68.0),
     );
     let p = ui.painter();
+    if theme::terminal() {
+        // 终端风：一行提示，不加框
+        p.text(
+            rect.left_top(),
+            Align2::LEFT_TOP,
+            format!("> {title}"),
+            egui::FontId::monospace(13.0),
+            theme::GOLD,
+        );
+        p.text(
+            rect.left_top() + vec2(0.0, 20.0),
+            Align2::LEFT_TOP,
+            format!("  {}", crate::util::text::truncate_chars(&line, 22)),
+            egui::FontId::monospace(12.5),
+            theme::TEXT,
+        );
+        return;
+    }
     p.rect_filled(
         rect,
         5,
@@ -563,6 +581,24 @@ fn big_button(
     disabled: bool,
     primary: bool,
 ) -> egui::Response {
+    if theme::terminal() {
+        let body = if hint.is_empty() {
+            format!("[ {label} ]")
+        } else {
+            format!("[ {label} ]\n  {hint}")
+        };
+        let mut b = egui::Button::new(
+            RichText::new(body)
+                .font(egui::FontId::monospace(13.0))
+                .color(if primary { theme::ACCENT } else { theme::TEXT }),
+        )
+        .frame(false)
+        .min_size(vec2(96.0, 52.0));
+        if primary {
+            b = b.fill(Color32::from_rgb(0x0C, 0x1A, 0x18));
+        }
+        return ui.add_enabled(!disabled, b);
+    }
     let text = if hint.is_empty() {
         RichText::new(label).size(15.0)
     } else {
@@ -578,6 +614,18 @@ fn big_button(
 }
 
 fn mini_bar(ui: &mut egui::Ui, label: &str, cur: i64, max: i64, color: Color32) {
+    if theme::terminal() {
+        let ratio = percent(cur, max);
+        let cells = 16usize;
+        let filled = (ratio * cells as f32).round() as usize;
+        let bar: String = "#".repeat(filled) + &"-".repeat(cells - filled);
+        ui.label(
+            RichText::new(format!("{label:<4}[{bar}] {cur}/{max}"))
+                .font(egui::FontId::monospace(10.5))
+                .color(color),
+        );
+        return;
+    }
     let (rect, _) = ui.allocate_exact_size(vec2(238.0, 13.0), Sense::hover());
     let p = ui.painter();
     p.rect_filled(rect, 2, Color32::from_rgb(0x0A, 0x0D, 0x10));

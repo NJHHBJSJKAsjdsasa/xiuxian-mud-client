@@ -26,6 +26,8 @@ struct Args {
     page: Option<String>,
     /// 开发/联调用：`--move 0`，进主界面后自动走第 n 个出口。
     move_index: Option<usize>,
+    /// 皮肤：`ink`（水墨，默认）或 `tui`（等宽字符）。
+    skin: Option<String>,
 }
 
 fn parse_args() -> Args {
@@ -38,6 +40,7 @@ fn parse_args() -> Args {
         snapshot: None,
         page: None,
         move_index: None,
+        skin: None,
     };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
@@ -55,6 +58,7 @@ fn parse_args() -> Args {
             "--snapshot" => a.snapshot = it.next(),
             "--page" => a.page = it.next(),
             "--move" => a.move_index = it.next().and_then(|v| v.parse().ok()),
+            "--skin" => a.skin = it.next(),
             "--log-level" => {
                 if let Some(v) = it.next() {
                     a.log_level = v;
@@ -147,6 +151,9 @@ fn main() -> eframe::Result {
     let snapshot = args.snapshot;
     let page = args.page;
     let move_index = args.move_index;
+    if args.skin.as_deref() == Some("tui") {
+        ui::theme::set_terminal(true);
+    }
 
     eframe::run_native(
         "九州问道",

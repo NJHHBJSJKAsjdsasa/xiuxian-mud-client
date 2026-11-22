@@ -50,6 +50,27 @@ pub fn install(ctx: &egui::Context) -> String {
         }
     }
 
+    // 终端皮肤：西文等宽（Consolas / Menlo），中文仍用 cjk 回退。
+    if theme::terminal()
+        && let Some((path, bytes)) = pick(&[
+            r"C:\Windows\Fonts\consola.ttf",
+            "/System/Library/Fonts/Menlo.ttc",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+        ])
+    {
+        fonts.font_data.insert(
+            "mono_latin".to_owned(),
+            Arc::new(egui::FontData::from_owned(bytes)),
+        );
+        if let Some(list) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
+            list.insert(0, "mono_latin".to_owned());
+        }
+        if let Some(list) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+            list.insert(0, "mono_latin".to_owned());
+        }
+        tracing::info!("终端皮肤字体：{}", short(path));
+    }
+
     let serif_desc = if let Some((path, bytes)) = serif {
         fonts.font_data.insert(
             "serif_cjk".to_owned(),

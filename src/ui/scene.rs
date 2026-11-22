@@ -562,6 +562,174 @@ fn draw_path(p: &egui::Painter, rect: Rect) {
     }
 }
 
+/// 终端皮肤：纯 ASCII 字符画。
+/// 山是斜线堆出来的，雨是竖线，人是三行字符——和 roguelike 一个语法。
+#[allow(clippy::needless_range_loop)] // 网格坐标直接当索引用，比迭代器清楚
+pub fn paint_terminal(ui: &Ui, rect: Rect, s: &Scene<'_>, pose: Pose) {
+    let p = ui.painter_at(rect);
+    let fs = 15.0;
+    let cw = fs * 0.60;
+    let lh = fs * 1.16;
+    let cols = (((rect.width() - 8.0) / cw).floor() as usize).max(24);
+    let rows = (((rect.height() - 8.0) / lh).floor() as usize).max(10);
+    let x0 = rect.left() + 4.0;
+    let y0 = rect.top() + 4.0;
+
+    let bg = Color32::from_rgb(0x04, 0x06, 0x08);
+    p.rect_filled(rect, 0, bg);
+
+    // 每层一张字符网格，逐行画；空格不遮挡下面的层。
+    let mut layers: Vec<(Vec<String>, Color32)> = Vec::new();
+
+    // 远、中、近三层山脊：每列只画脊线，靠斜线字符连成轮廓。
+    for (base_r, amp_r, seed, color) in [
+        (0.50f32, 0.26f32, 1.7f32, theme::mix(bg, theme::LINE, 0.50)),
+        (0.64, 0.20, 3.1, theme::mix(bg, theme::LINE, 0.85)),
+        (0.78, 0.14, 5.3, theme::mix(bg, theme::TEXT, 0.25)),
+    ] {
+        let mut grid = vec![vec![' '; cols]; rows];
+        let base = (rows as f32 * base_r) as i32;
+        let mut prev_h = 0f32;
+        for c in 0..cols {
+            let t = c as f32 / cols as f32;
+            let wave = (t * 6.5 + seed).sin() * 0.55
+                + (t * 14.0 + seed * 2.0).sin() * 0.30
+                + (t * 29.0 + seed).sin() * 0.15;
+            let h = ((0.45 + 0.55 * wave) * amp_r * rows as f32).max(0.0);
+            let top = (base as f32 - h) as i32;
+            if top >= 0 && (top as usize) < rows && (base as usize) < rows {
+                let ch = if h > prev_h + 0.05 {
+                    '/'
+                } else if h + 0.05 < prev_h {
+                    '\\'
+                } else {
+                    '_'
+                };
+                grid[top as usize][c] = ch;
+                // 脊线下两行画山体，给一点厚度
+                for d in 1..=2usize {
+                    if (top as usize) + d < (base as usize).min(rows) {
+                        grid[top as usize + d][c] = ':';
+                    }
+                }
+                // 山脚一条基线，隔一列画一个，像地纹
+                if c % 2 == 0 {
+                    grid[base as usize][c] = '.';
+                }
+            }
+            prev_h = h;
+        }
+        layers.push((grid.iter().map(|r| r.iter().collect()).collect(), color));
+    }
+
+    // 地面
+    {
+        let mut grid = vec![vec![' '; cols]; rows];
+        let g = ((rows as f32 * 0.82) as usize).min(rows - 1);
+        for c in 0..cols {
+            for r in g..rows {
+                grid[r][c] = if r == g { '=' } else { '.' };
+            }
+        }
+        layers.push((grid.iter().map(|r| r.iter().collect()).collect(), theme::mix(bg, theme::GOLD, 0.28)));
+    }
+
+    // 人影（三行字符）
+    {
+        let mut grid = vec![vec![' '; cols]; rows];
+        let cx = cols / 2;
+        let gy = ((rows as f32 * 0.82) as usize).saturating_sub(1);
+        let body: [&str; 3] = match pose {
+            Pose::Sitting => [" o ", "/|\\", "==="],
+            Pose::Walking => [" o ", "/|\\", " |\\"],
+            Pose::Standing => [" o ", "/|\\", "/ \\"],
+        };
+        for (i, line) in body.iter().enumerate() {
+            let r = gy.saturating_sub(2).saturating_add(i);
+            if r >= rows {
+                continue;
+            }
+            for (j, ch) in line.chars().enumerate() {
+                let c = cx.saturating_sub(1) + j;
+                if c < cols && ch != ' ' {
+                    grid[r][c] = ch;
+                }
+            }
+        }
+        layers.push((grid.iter().map(|r| r.iter().collect()).collect(), theme::TEXT));
+    }
+
+    // 天气：雨/雪/沙
+    if matches!(s.weather, "rain" | "storm" | "snow" | "hail" | "sandstorm" | "fog") {
+        let mut grid = vec![vec![' '; cols]; rows];
+        let ch = match s.weather {
+            "snow" | "hail" => '*',
+            "sandstorm" => '~',
+            "fog" => '~',
+            _ => '|',
+        };
+        let count = match s.weather {
+            "fog" => cols / 3,
+            "sandstorm" => cols / 2,
+            _ => cols,
+        };
+        let top_rows = (rows as f32 * 0.78) as usize;
+        for i in 0..count {
+            let c = (rnd(i as u32, 11) * cols as f32) as usize % cols;
+            let r = (rnd(i as u32, 23) * top_rows as f32) as usize % top_rows.max(1);
+            grid[r][c] = ch;
+        }
+        layers.push((grid.iter().map(|r| r.iter().collect()).collect(), theme::mix(bg, theme::ACCENT, 0.45)));
+    }
+
+    let font = FontId::monospace(fs);
+    for (lines, color) in layers {
+        for (i, line) in lines.iter().enumerate() {
+            p.text(
+                pos2(x0, y0 + i as f32 * lh),
+                Align2::LEFT_TOP,
+                line,
+                font.clone(),
+                color,
+            );
+        }
+    }
+
+    // 标题与说明（中文，不走网格）
+    p.text(
+        pos2(rect.left() + 26.0, rect.top() + 20.0),
+        Align2::LEFT_TOP,
+        s.name,
+        theme::title_id(28.0),
+        theme::TEXT,
+    );
+    let mut meta = String::new();
+    if !s.region.is_empty() {
+        meta.push_str(s.region);
+    }
+    if let Some(g) = s.grade {
+        meta.push_str(" · ");
+        meta.push_str(g);
+    }
+    meta.push_str(&format!(" · 探索 {}/20", s.explored));
+    p.text(
+        pos2(rect.left() + 28.0, rect.top() + 56.0),
+        Align2::LEFT_TOP,
+        meta,
+        FontId::monospace(11.5),
+        theme::GOLD,
+    );
+    if !s.desc.is_empty() {
+        p.text(
+            pos2(rect.left() + 28.0, rect.top() + 74.0),
+            Align2::LEFT_TOP,
+            crate::util::text::truncate_chars(s.desc, 46),
+            FontId::monospace(12.5),
+            theme::mix(theme::TEXT, bg, 0.25),
+        );
+    }
+}
+
 fn draw_weather(p: &egui::Painter, rect: Rect, weather: &str) {
     match weather {
         "rain" | "storm" => {

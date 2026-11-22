@@ -23,12 +23,48 @@ pub const PVP: Color32 = Color32::from_rgb(0xA9, 0x8B, 0xC8);
 /// 衬线家族名，由 `ui::fonts` 注册。
 pub const SERIF: &str = "serif";
 
+/// 皮肤：水墨（默认）或终端（等宽字符 + 直角 + 无渐变）。
+static TERMINAL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_terminal(on: bool) {
+    TERMINAL.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn terminal() -> bool {
+    TERMINAL.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+fn body_family() -> FontFamily {
+    if terminal() {
+        FontFamily::Monospace
+    } else {
+        FontFamily::Proportional
+    }
+}
+
+/// 标题：终端皮肤下也用等宽，保持"同一个字符网格"。
+pub fn title_family() -> FontFamily {
+    if terminal() {
+        FontFamily::Monospace
+    } else {
+        serif()
+    }
+}
+
+pub fn title_id(size: f32) -> FontId {
+    FontId::new(size, title_family())
+}
+
 pub fn serif() -> FontFamily {
     FontFamily::Name(SERIF.into())
 }
 
 pub fn serif_id(size: f32) -> FontId {
-    FontId::new(size, serif())
+    if terminal() {
+        FontId::new(size, FontFamily::Monospace)
+    } else {
+        FontId::new(size, serif())
+    }
 }
 
 /// 日志类型 → 颜色；未知类型按系统处理。
@@ -80,10 +116,16 @@ pub fn apply(ctx: &egui::Context) {
     v.widgets.active.bg_stroke = Stroke::new(1.0_f32, ACCENT);
     v.window_stroke = Stroke::new(1.0_f32, LINE);
     // 控件圆角小一些，接近木牌/签条，而不是网页卡片。
-    v.widgets.noninteractive.corner_radius = egui::CornerRadius::same(3);
-    v.widgets.inactive.corner_radius = egui::CornerRadius::same(3);
-    v.widgets.hovered.corner_radius = egui::CornerRadius::same(3);
-    v.widgets.active.corner_radius = egui::CornerRadius::same(3);
+    let radius = if terminal() { 0 } else { 3 };
+    v.widgets.noninteractive.corner_radius = egui::CornerRadius::same(radius);
+    v.widgets.inactive.corner_radius = egui::CornerRadius::same(radius);
+    v.widgets.hovered.corner_radius = egui::CornerRadius::same(radius);
+    v.widgets.active.corner_radius = egui::CornerRadius::same(radius);
+    if terminal() {
+        v.panel_fill = Color32::from_rgb(0x05, 0x07, 0x09);
+        v.extreme_bg_color = Color32::from_rgb(0x03, 0x04, 0x06);
+        v.window_fill = Color32::from_rgb(0x05, 0x07, 0x09);
+    }
 
     // 用 all_styles_mut 一次写入两套主题：
     // 只调 set_visuals 会被随后 set_style 的旧 style 覆盖（TextEdit 底仍是浅色）。
@@ -96,7 +138,7 @@ pub fn apply(ctx: &egui::Context) {
             .insert(TextStyle::Heading, FontId::new(22.0, serif()));
         style
             .text_styles
-            .insert(TextStyle::Body, FontId::new(14.5, FontFamily::Proportional));
+            .insert(TextStyle::Body, FontId::new(14.5, body_family()));
         style.text_styles.insert(
             TextStyle::Button,
             FontId::new(14.0, FontFamily::Proportional),
