@@ -32,6 +32,9 @@ pub struct App {
     preferred_page: Option<Page>,
     /// `--move n`：进主界面后自动走第 n 个出口。
     pending_move: Option<usize>,
+    /// 下一次允许补拉舆图的时刻（毫秒）。赶路中服务端会拒 `worldMap`（E-BUSY），
+    /// 拒了就等一会儿再要，否则地名会一直停在出发地。
+    map_retry_at: i64,
 }
 
 impl App {
@@ -66,6 +69,7 @@ impl App {
             pending_create: None,
             preferred_page: None,
             pending_move: None,
+            map_retry_at: 0,
         }
     }
 
@@ -493,6 +497,7 @@ impl App {
     }
 
     pub fn tick(&mut self) {
+        self.refresh_stale_map();
         if self.ui.login.loading && self.submit_at > 0 && time::now_ms() - self.submit_at > 12_000 {
             self.ui.login.loading = false;
             self.ui.login.error = "服务端没有响应，请检查地址与网络".into();
@@ -513,6 +518,29 @@ impl App {
                 register: false,
             });
         }
+    }
+
+    /// 舆图与角色位置不一致时补拉一次 `worldMap`。
+    ///
+    /// `worldMap` 在赶路途中会被服务端以 E-BUSY 拒掉（服务端口径：此刻不可为），
+    /// 所以不能只在"位置变了"那一刻要一次；到点后按 600ms 节流重试，
+    /// 直到 `map` 帧把 `world.loc` 对齐到 `player.loc`。
+    fn refresh_stale_map(&mut self) {
+        if !self.online() || !self.state.has_char {
+            return;
+        }
+        let (Some(map), Some(player)) = (self.state.world.get(), self.state.player.get()) else {
+            return;
+        };
+        if map.loc == player.loc {
+            return;
+        }
+        let now = time::now_ms();
+        if now < self.map_retry_at {
+            return;
+        }
+        self.map_retry_at = now + 600;
+        self.act(action::WORLD_MAP, serde_json::json!({}));
     }
 
     pub fn shutdown(&mut self) {
