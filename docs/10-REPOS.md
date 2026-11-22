@@ -2,10 +2,10 @@
 
 ```
 doc_id: C-10
-version: 2.0.0
-updated: 2026-11-21
+version: 3.0.0
+updated: 2026-11-22
 owns: 客户端仓的克隆、密钥、日常循环、与服务端的协议同步、构建发布与排错
-depends_on: C-00、C-03、服务端 docs/05、服务端 docs/13
+depends_on: C-00、C-02、C-03、服务端 docs/05、服务端 docs/13
 ```
 
 ## 1. 拓扑
@@ -34,12 +34,18 @@ depends_on: C-00、C-03、服务端 docs/05、服务端 docs/13
 git clone git@github-client:NJHHBJSJKAsjdsasa/xiuxian-mud-client.git client
 cd client
 python tools/doc-check.py     # 文档矩阵与链接
-cargo build                   # 首次拉依赖
+cargo build                   # 首次拉依赖（eframe 编译约 3–6 分钟）
 cargo run -- --server ws://127.0.0.1:8080
 ```
 
 联调需要服务端在跑（另一个仓库）：`go run ./cmd/server`，默认 `127.0.0.1:8080`。
 客户端用配置项 `server` 指定地址；不带则读 `config.toml` 或默认本机。
+
+Linux 首次编译要先装图形依赖（eframe 官方要求）：
+
+```bash
+sudo apt-get install libxkbcommon-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+```
 
 ## 4. 日常循环
 
@@ -47,15 +53,16 @@ cargo run -- --server ws://127.0.0.1:8080
 cd client
 python tools/doc-check.py     # 文档（改文档必跑）
 cargo fmt --check
-cargo clippy -- -D warnings
-cargo test
+cargo clippy --all-targets -- -D warnings
+cargo test                    # 含 --test ui / --test replay
 git add -A && git commit -m "feat: ..." && git push origin main
 ```
 
 - 提交信息中文，`feat:` / `fix:` / `docs:` / `refactor:` 前缀。
 - 改了 `docs/` 任一份，必须同步 `docs/00-INDEX.md` 的矩阵与版本，否则 `doc-check` 红。
-- 改了协议消费方式（不是服务端字段），在提交信息里引用服务端对应提交号，例如 `server@7908c61`。
+- 改了协议消费方式（不是服务端字段），在提交信息里引用服务端对应提交号，例如 `server@e5effdf`。
 - `Cargo.lock` 入库（二进制项目），不要加进 `.gitignore`。
+- 改 UI 的 PR 附一张 `--snapshot` 截图（改前/改后各一张），比文字描述省时间。
 
 ## 5. 协议同步（与服务端对齐）
 
@@ -73,28 +80,39 @@ git add -A && git commit -m "feat: ..." && git push origin main
 ## 6. 构建与发布
 
 ```bash
-cargo build --release                     # 本机
-cargo build --release --target x86_64-pc-windows-msvc
-cargo build --release --target x86_64-unknown-linux-musl   # 静态二进制
-cargo build --release --target aarch64-apple-darwin        # Apple Silicon
+cargo build --release                                       # 本机
+cargo build --release --target x86_64-pc-windows-msvc        # Windows
+cargo build --release --target x86_64-unknown-linux-musl     # Linux（静态部分；图形库仍需系统提供）
+cargo build --release --target aarch64-apple-darwin         # Apple Silicon
 ```
 
-- 产物是单二进制（无运行时），发布 = 上传二进制 + 一份 `config.example.toml`。
-- 发布前确认三件事：`PROTO` 落在服务端支持区间；默认 `server` 指向生产地址；`doc-check` 与 `cargo test` 绿。
+| 平台 | 产物 | 备注 |
+|---|---|---|
+| Windows | `xiuxian-client.exe`（约 12–20MB） | 用 `winres`/`embed-resource` 写入图标与版本信息 |
+| macOS | `xiuxian-client.app` | `cargo-bundle` 打包；未签名时用户需右键打开或 `xattr -dr com.apple.quarantine` |
+| Linux | 单二进制 + `xiuxian-client.desktop` | 不提供 AppImage 也能用；桌面文件只为图标与菜单项 |
+
+- 字体与图标都编进二进制：发布**不需要**附带 `assets/` 目录。
+- 发布前确认四件事：`PROTO` 落在服务端支持区间；默认 `server` 指向生产地址；release 包实测冷启动与待机 CPU；
+  `doc-check`、`cargo test`、`clippy` 全绿。
 - 回滚：换回上一个二进制；不涉及数据库。
-- Windows 用户第一次运行可能触发 SmartScreen，文档里写明如何放行（不签名）。
+- Windows 用户第一次运行可能触发 SmartScreen：文档里写明"更多信息 → 仍要运行"（不签名）。
 
 ## 7. 排错
 
 | 现象 | 原因 | 处置 |
 |---|---|---|
+| 窗口一闪就退 | GPU 初始化失败（远程桌面/老驱动） | 命令行加 `--renderer glow`；仍失败看 `logs/panic.log` |
+| 界面全黑但能听到操作 | wgpu 后端与驱动不兼容 | 同上切 glow；或更新显卡驱动 |
+| 文字全是方块 | 字体子集没编进去 / 缺字 | 确认 `assets/fonts/*.otf` 入库；设置页看缺字码位清单 |
+| 文字发虚 | 系统缩放与手动缩放叠加过头 | 设置里把手动档调回 100%，只留系统缩放 |
+| 点击位置偏移 | 用了 `ctx.pixels_per_point` 手算坐标 | 布局一律用 `ui.available_width()` 等相对量，不写绝对像素 |
+| 待机风扇转 | 某处无条件 `request_repaint()` | 全局搜 `request_repaint`，去掉无状态变化的那处 |
 | `Permission denied (publickey)` | 用了服务端别名，或部署密钥没加/没勾写权限 | 查 `git remote -v` 与 `ssh -T git@github-client` |
 | 推上去被拒（non-fast-forward） | 远端有新提交 | `git pull --rebase origin main` 后再推 |
 | 连上就被断开（4004） | 客户端 `PROTO` 与服务端不兼容 | 升级客户端；不要改重连逻辑绕过 |
 | 连上就被断开（4003） | token 失效 | 清 token 回登录 |
 | 4001 | 同账号在别处登录 | 提示并停止重连 |
-| 中文界面错列 | 某处直接用了 `len()` 而不是 `unicode-width` | 统一走 `util/text.rs` 的截断/填充 |
-| 运行时 panic 后终端花屏 | panic 未恢复终端 | `main` 里装 panic hook，先 `disable_raw_mode` 再退出 |
 | `doc-check` 红 | 改了文档没同步矩阵/版本 | 按提示补 `C-00` 行与版本 |
 
 ## 8. 镜像说明
