@@ -11,7 +11,9 @@
 
 ## 现状
 
-**M1 已落地**（2026-11-22）：登录 / 建号 / 主界面三栏 / 日志 / 出口移动（含赶路倒计时）/ 打坐 / 突破 / 探索的请求链路可用。
+**M1 已落地**（2026-11-22）：登录 / 建号 / 场景与见闻 / 出路移动（含赶路倒计时）/ 打坐 / 突破 / 探索的请求链路可用。
+
+![主界面](docs/screenshots/main-window.png)
 
 
 - `src/` 已落盘：protocol / net / store / ui / util / config / app。
@@ -53,6 +55,9 @@ cargo run -- --server ws://127.0.0.1:8080
 
 ```bash
 cargo run -- --server ws://127.0.0.1:8080 --login 沈砚:test123456 --create 沈砚
+
+# 主界面就绪后抓一帧存 PNG 再退出（改界面时贴图用）
+cargo run -- --server ws://127.0.0.1:8080 --login 沈砚:test123456 --snapshot shot.png
 ```
 
 服务器地址也可以写在 `config.toml` 的 `server` 项；命令行优先。

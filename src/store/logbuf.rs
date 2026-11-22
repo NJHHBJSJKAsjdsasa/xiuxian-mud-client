@@ -51,6 +51,7 @@ impl LogBuf {
         self.lines.len()
     }
 
+    #[allow(dead_code)]
     pub fn dropped(&self) -> u64 {
         self.dropped
     }

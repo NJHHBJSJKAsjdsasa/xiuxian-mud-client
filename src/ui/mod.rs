@@ -2,11 +2,11 @@
 
 pub mod fonts;
 pub mod logview;
+pub mod scene;
 pub mod theme;
 pub mod views;
 
 use crate::store::AppState;
-use crate::util::text::thousands;
 use crate::util::time;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -218,10 +218,4 @@ fn draw_toasts(ctx: &egui::Context, st: &mut UiState) {
     if let Some(i) = dismiss {
         st.toasts.remove(i);
     }
-}
-
-/// 顶栏与状态栏共用的小工具：千分位数字 + 弱化单位。
-pub fn num(ui: &mut egui::Ui, label: &str, value: i64, color: egui::Color32) {
-    ui.label(egui::RichText::new(label).small().color(theme::DIM));
-    ui.label(egui::RichText::new(thousands(value)).color(color));
 }

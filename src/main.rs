@@ -20,6 +20,8 @@ struct Args {
     login: Option<(String, String)>,
     /// 开发/联调用：`--create 道号`，登录后自动建号。
     create: Option<String>,
+    /// 开发/联调用：`--snapshot out.png`，主界面就绪后抓一帧并退出。
+    snapshot: Option<String>,
 }
 
 fn parse_args() -> Args {
@@ -29,6 +31,7 @@ fn parse_args() -> Args {
         log_level: "info".into(),
         login: None,
         create: None,
+        snapshot: None,
     };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
@@ -43,6 +46,7 @@ fn parse_args() -> Args {
                 }
             }
             "--create" => a.create = it.next(),
+            "--snapshot" => a.snapshot = it.next(),
             "--log-level" => {
                 if let Some(v) = it.next() {
                     a.log_level = v;
@@ -73,7 +77,24 @@ fn init_tracing(level: &str) {
         .try_init();
 }
 
+/// Windows 上必须先声明 DPI 感知：否则系统按 150% 缩放把窗口物理尺寸压小，
+/// 而 winit 仍报虚拟尺寸，egui 按虚拟尺寸排版，右侧内容会被裁到屏幕外。
+#[cfg(windows)]
+fn enable_dpi_awareness() {
+    use windows_sys::Win32::UI::HiDpi::{
+        DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
+    };
+    // SAFETY: 进程启动早期调用一次，参数是微软文档里的固定常量。
+    unsafe {
+        SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    }
+}
+
+#[cfg(not(windows))]
+fn enable_dpi_awareness() {}
+
 fn main() -> eframe::Result {
+    enable_dpi_awareness();
     let args = parse_args();
     init_tracing(&args.log_level);
 
@@ -106,8 +127,8 @@ fn main() -> eframe::Result {
 
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
-            .with_inner_size([1360.0, 840.0])
-            .with_min_inner_size([1100.0, 680.0])
+            .with_inner_size([1200.0, 760.0])
+            .with_min_inner_size([1000.0, 640.0])
             .with_title("九州问道"),
         renderer,
         ..Default::default()
@@ -115,6 +136,7 @@ fn main() -> eframe::Result {
 
     let login = args.login;
     let create = args.create;
+    let snapshot = args.snapshot;
 
     eframe::run_native(
         "九州问道",
@@ -127,6 +149,9 @@ fn main() -> eframe::Result {
             }
             if let Some(name) = create.clone() {
                 app.auto_create(name);
+            }
+            if let Some(path) = snapshot.clone() {
+                app.snapshot_to(path.into());
             }
             Ok(Box::new(app))
         }),

@@ -26,6 +26,9 @@ pub struct ClientApp {
     pending_login: Option<(String, String)>,
     /// 待自动建号的道号（`--create`）。
     pending_create: Option<String>,
+    /// `--snapshot <path>`：主界面稳定后抓一帧存 PNG 并退出。
+    snapshot_path: Option<std::path::PathBuf>,
+    snapshot_countdown: Option<u32>,
 }
 
 impl ClientApp {
@@ -71,6 +74,8 @@ impl ClientApp {
             submit_at: 0,
             pending_login: None,
             pending_create: None,
+            snapshot_path: None,
+            snapshot_countdown: None,
         }
     }
 
@@ -84,6 +89,11 @@ impl ClientApp {
     /// 开发/联调：登录后如果还没有角色，自动建号。
     pub fn auto_create(&mut self, name: String) {
         self.pending_create = Some(name);
+    }
+
+    /// 开发/联调：主界面出来后抓一帧存 PNG，然后退出。
+    pub fn snapshot_to(&mut self, path: std::path::PathBuf) {
+        self.snapshot_path = Some(path);
     }
 
     /// 命令行 `--server` 覆盖配置文件里的地址。
@@ -339,6 +349,55 @@ impl ClientApp {
         }
     }
 
+    /// 等主界面与地图都就绪，再走 30 帧让布局稳定，然后请求截图。
+    fn tick_snapshot(&mut self, ctx: &egui::Context) {
+        // 截图事件：拿到图就落盘并退出。
+        let shot = ctx.input(|i| {
+            i.events.iter().find_map(|e| {
+                if let egui::Event::Screenshot { image, .. } = e {
+                    Some(image.clone())
+                } else {
+                    None
+                }
+            })
+        });
+        if let Some(img) = shot
+            && let Some(path) = self.snapshot_path.take()
+        {
+            let [w, h] = img.size;
+            let mut buf = Vec::with_capacity(w * h * 4);
+            for px in &img.pixels {
+                buf.extend_from_slice(&[px.r(), px.g(), px.b(), px.a()]);
+            }
+            match image::save_buffer(&path, &buf, w as u32, h as u32, image::ColorType::Rgba8) {
+                Ok(()) => tracing::info!("截图已保存：{}", path.display()),
+                Err(e) => tracing::error!("截图保存失败：{e}"),
+            }
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
+        }
+
+        let Some(_) = self.snapshot_path else { return };
+        if self.state.world.get().is_none() || self.ui.view != View::Main {
+            return;
+        }
+        let left = match &mut self.snapshot_countdown {
+            Some(n) => {
+                *n = n.saturating_sub(1);
+                *n
+            }
+            None => {
+                self.snapshot_countdown = Some(30);
+                30
+            }
+        };
+        if left == 0 {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
+            self.snapshot_countdown = Some(u32::MAX / 2); // 防止重复请求
+        }
+        ctx.request_repaint();
+    }
+
     fn online(&self) -> bool {
         matches!(self.state.conn, ConnStatus::Online)
     }
@@ -417,6 +476,7 @@ impl ClientApp {
 impl eframe::App for ClientApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.drain_events();
+        self.tick_snapshot(ctx);
 
         // 提交后 12 秒没有任何回音，恢复按钮，避免"永远转圈"。
         if self.ui.login.loading && self.submit_at > 0 && time::now_ms() - self.submit_at > 12_000 {

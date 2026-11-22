@@ -4805,6 +4805,7 @@ dependencies = [
  "eframe",
  "egui",
  "futures-util",
+ "image",
  "reqwest",
  "serde",
  "serde_json",
@@ -4815,6 +4816,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
