@@ -1,4 +1,4 @@
-//! 文本：千分位、按字符截断。
+//! 文本：千分位、按显示宽度截断与补齐。
 
 /// `12340` → `12,340`；负数保留符号。
 pub fn thousands(n: i64) -> String {
@@ -15,6 +15,47 @@ pub fn thousands(n: i64) -> String {
         out.push(ch);
     }
     out
+}
+
+/// 一个字符在终端里占几列。
+///
+/// 直接用 `unicode-width`：ratatui 排版也用它，两边算出来的列数必须一致，
+/// 否则快照导出、地图标签会错位（全角标点、破折号都是 2 列）。
+pub fn char_width(c: char) -> usize {
+    unicode_width::UnicodeWidthChar::width(c).unwrap_or(0)
+}
+
+/// 字符串的显示宽度（列数）。
+pub fn width(s: &str) -> usize {
+    unicode_width::UnicodeWidthStr::width(s)
+}
+
+/// 按**显示宽度**截断，超出部分用省略号占两列。
+pub fn truncate_width(s: &str, max: usize) -> String {
+    if width(s) <= max {
+        return s.to_string();
+    }
+    let mut out = String::new();
+    let mut used = 0;
+    for c in s.chars() {
+        let w = char_width(c);
+        if used + w + 2 > max {
+            break;
+        }
+        out.push(c);
+        used += w;
+    }
+    out.push('…');
+    out
+}
+
+/// 补空格到指定显示宽度；已超出则原样返回。
+pub fn pad_to(s: &str, target: usize) -> String {
+    let w = width(s);
+    if w >= target {
+        return s.to_string();
+    }
+    format!("{s}{}", " ".repeat(target - w))
 }
 
 /// 按**字符**截断（不是字节），超出加省略号。
@@ -53,5 +94,27 @@ mod tests {
     fn truncate_is_char_based() {
         assert_eq!(truncate_chars("青云·望云台", 3), "青云…");
         assert_eq!(truncate_chars("短", 3), "短");
+    }
+
+    #[test]
+    fn width_counts_cjk_as_two_columns() {
+        assert_eq!(width("abc"), 3);
+        assert_eq!(width("青云"), 4);
+        assert_eq!(width("青云 abc"), 8);
+    }
+
+    #[test]
+    fn truncate_width_never_overflows() {
+        for max in 0..12 {
+            assert!(width(&truncate_width("青云·望云台 12s", max)) <= max.max(2));
+        }
+        assert_eq!(truncate_width("短", 4), "短");
+    }
+
+    #[test]
+    fn pad_to_uses_display_width() {
+        assert_eq!(pad_to("青云", 6), "青云  ");
+        assert_eq!(width(&pad_to("青云", 6)), 6);
+        assert_eq!(pad_to("青云问道阁", 4), "青云问道阁");
     }
 }

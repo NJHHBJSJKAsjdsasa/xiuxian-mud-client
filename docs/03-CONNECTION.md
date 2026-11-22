@@ -2,9 +2,9 @@
 
 ```
 doc_id: C-03
-version: 3.0.0
+version: 4.0.0
 updated: 2026-11-22
-owns: 登录流程、协议版本握手、心搏、重连状态机、关闭码处置、窗口生命周期
+owns: 登录流程、协议版本握手、心搏、重连状态机、关闭码处置、终端生命周期
 depends_on: 服务端 05（P-REST-01/02、P-MSG-01/05、关闭码表）、12（快速开始）
 ```
 
@@ -12,8 +12,8 @@ depends_on: 服务端 05（P-REST-01/02、P-MSG-01/05、关闭码表）、12（�
 
 ```
 启动
- ├─ 读 config.toml（server / ui_scale / last_name / token 是否存在）
- ├─ 装字体与主题，开窗口（1280×800），显示登录页
+ ├─ 读 config.toml（server / last_name / show_timestamps / token 是否存在）
+ ├─ 进备用屏（alternate screen），画登录页
  └─ 有 token 且勾了记住我 → 直接尝试 WS 恢复
         │
         ├─ REST 登录     POST /api/login {name, pass} → 200 {token, hasChar}
@@ -32,7 +32,7 @@ depends_on: 服务端 05（P-REST-01/02、P-MSG-01/05、关闭码表）、12（�
         │      └─ 失败 → 登录页内联错误（不弹系统对话框）
 ```
 
-- 登录页与主界面是**同一个窗口的两个页面**（`ui::View::Login / Create / Main / Fatal`），不频繁开关窗口。
+- 登录页与主界面是**同一屏的两个页面**（`View::Login / Create / Main / Fatal`），不反复进出备用屏。
 - 登录中的按钮进入 loading 态（禁点 + 转圈），请求 8 秒超时后恢复可点并显示原因。
 - `ready.server_now` 用来算时钟偏移：`offset = server_now - now_ms()`，之后所有倒计时都用服务端时间。
 - `--replay frames.jsonl` 时跳过整个 REST/WS 流程，直接进主界面并回放（`C-08` §6）。
@@ -92,14 +92,14 @@ CONNECTING ──open──► HELLO ──ready──► ONLINE ──close(cod
 - 收到 `err` 且 `code=E-COOLDOWN` 时，用 `extra.retryMs`（若有）或本地表刷新倒计时。
 - 写通道有界（容量 64）：满了就丢弃重复的 `ping`，但**动作帧不允许丢**——丢动作比慢更糟。
 
-## 6. 窗口生命周期
+## 6. 终端生命周期
 
-- **关窗**：`eframe` 的 `on_exit` 里发 `{"t":"close"}` 或 WS Close(1000)，最多等 300ms，
+- **退出**：按 `q`（或 `Ctrl+C`）时发 `{"t":"close"}` 或 WS Close(1000)，最多等 300ms，
   然后 `runtime.shutdown_timeout(200ms)`。不等待也能退出，但服务端会多留一条超时记录。
-- **最小化**：默认不降频渲染（egui 本来就不渲染隐藏窗口的帧）；托盘图标不在首版范围。
-- **崩溃**：装 `std::panic::set_hook`，把 panic 信息写 `logs/panic.log`，再用 `rfd` 弹原生错误框，
-  避免"窗口一闪就没了"没有任何线索。编译期开 `panic = "abort"` 的 release profile 只用于最终包，
-  开发包保留 unwind 以便看到 backtrace。
+- **挂后台**：终端切走后仍按 30ms 轮询；不做省电降频（CPU 占用本就低于 1%）。
+- **崩溃**：装 `std::panic::set_hook`，先 `disable_raw_mode` + `LeaveAlternateScreen` 把终端恢复，
+  再把 panic 信息写 `logs/panic.log` 并打到 stderr——终端程序不能弹窗，也不该留下一个乱码屏幕。
+  release 保留 unwind，开发包保留 backtrace。
 
 ## 7. 实现落点（Rust）
 
@@ -109,9 +109,9 @@ CONNECTING ──open──► HELLO ──ready──► ONLINE ──close(cod
 | REST | `src/net/http.rs` | `reqwest` + rustls；只三个端点 |
 | 帧编解码 | `src/protocol/frame.rs` | `In { t, n, a, d }` / `Out`；`serde_json` 直接映射 |
 | 关闭码 | `src/protocol/err.rs` | 常量与 `match`，不散落数字 |
-| 唤醒 UI | `src/net/ws.rs` | 每帧 `ctx.request_repaint()`；批量事件合并成一次唤醒 |
+| 唤醒 UI | `src/net/ws.rs` → `NetEvent` 队列 | 网络只往有界队列（4096）里塞事件；主循环每 30ms drain 一次，界面不被动重绘 |
 | 超时 | `tokio::time::timeout` | hello / ready / REST / 单动作各有独立超时 |
-| 登录态 | `src/store/mod.rs` + `src/ui/views/login.rs` | `View` 枚举 + `LoginState`（Idle/Loading/Error） |
+| 登录态 | `src/view.rs` | `View` 枚举 + `LoginForm`（loading / error / focus） |
 
 ## 8. 待确认的实现细节
 

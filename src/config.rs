@@ -8,9 +8,7 @@ use serde::{Deserialize, Serialize};
 #[serde(default)]
 pub struct Config {
     pub server: String,
-    pub ui_scale: f32,
     pub show_timestamps: bool,
-    pub theme: String,
     pub last_name: String,
 }
 
@@ -18,9 +16,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             server: "ws://127.0.0.1:8080".into(),
-            ui_scale: 1.0,
             show_timestamps: true,
-            theme: "dark".into(),
             last_name: String::new(),
         }
     }
@@ -66,6 +62,7 @@ impl Config {
 }
 
 /// 日志目录：`dirs::data_local_dir()/xiuxian-client/logs`。
+#[allow(dead_code)] // 崩溃日志目录，后续接 panic hook
 pub fn log_dir() -> PathBuf {
     dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."))

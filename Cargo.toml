@@ -2,17 +2,16 @@
 name = "xiuxian-client"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.95"
-description = "《九州问道》桌面客户端（Rust + egui）"
+rust-version = "1.87"
+description = "《九州问道》终端客户端（Rust + ratatui）"
 
 [dependencies]
 anyhow = "1.0.104"
 crossbeam-channel = "0.5.17"
+crossterm = "0.28"
 dirs = "7.0.0"
-eframe = { version = "0.32.3", features = ["glow", "default_fonts"] }
-egui = { version = "0.32.3", features = ["default_fonts"] }
 futures-util = "0.3.34"
-image = { version = "0.25.10", default-features = false, features = ["png"] }
+ratatui = "0.29"
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "json"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
@@ -23,11 +22,9 @@ tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"]
 toml = "1.2.2"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+unicode-width = "0.2"
 
 [profile.release]
 lto = "thin"
 codegen-units = 1
 strip = true
-
-[target."cfg(windows)".dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_UI_HiDpi"] }

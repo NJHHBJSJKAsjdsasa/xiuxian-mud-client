@@ -2,9 +2,9 @@
 
 ```
 doc_id: C-02
-version: 3.1.0
+version: 4.0.0
 updated: 2026-11-22
-owns: 技术选型、crate 清单、分层、目录结构、线程模型、资源与字体、模块依赖规则
+owns: 技术选型、crate 清单、分层、目录结构、线程模型、模块依赖规则
 depends_on: C-01、C-03、C-04、C-05
 ```
 
@@ -12,48 +12,41 @@ depends_on: C-01、C-03、C-04、C-05
 
 ```
 ┌──────────────────────────────────────────┐
-│ ui/      egui 绘制与输入（主线程）        │  只读 store，只发 Intent
+│ tui/     ratatui 绘制 + crossterm 事件    │  只读 view/store，不发请求
 ├──────────────────────────────────────────┤
-│ app/     eframe::App::update（每帧一次）  │  drain 事件 → 更新 store → 画一帧
+│ app/     状态机：按键 → Intent → 网络命令 │  网络事件 → store → 触发重绘
 ├──────────────────────────────────────────┤
-│ store/   客户端状态（单一可变源）         │  由服务端帧驱动，不反向推导
+│ view/    页面与输入状态（纯数据）          │  不含任何渲染框架类型
 ├──────────────────────────────────────────┤
-│ net/     连接、握手、重连（tokio 线程）   │  只认协议，不懂业务语义
+│ store/   客户端状态（单一可变源）          │  由服务端帧驱动，不反向推导
+├──────────────────────────────────────────┤
+│ net/     REST 登录 + WS 长连接            │  只认协议，不懂业务
+├──────────────────────────────────────────┤
+│ protocol/ 帧与视图结构                    │ 与 05-PROTOCOL 一一对应
 └──────────────────────────────────────────┘
-        ↑ 全部依赖 protocol/（serde 类型）
 ```
 
-**依赖规则（违反即 review 不通过）**
-
-1. `ui` 不得直接读写 socket，也不得自己发动作；只能发 `Intent`，由 `app` 转成 `NetCmd`。
-2. `net` 不得读业务状态；只负责"连、握手、收发、断线重连、关闭码处置"。
-3. `store` 是唯一可变状态；`ui` 通过 `&AppState` 只读渲染。**`store` 里不出现任何 `egui` 类型**（含 `Color32`、`RichText`）。
-4. 协议类型只在 `protocol/` 定义，字段名与服务端 `05` 一致，不改名。
-5. 任何 `unwrap()` 只能在"不可能失败"处出现，并在注释里说明为什么不可能；网络与 JSON 路径一律 `Result`。
-6. `ui` 代码不做阻塞调用：登录/建号等请求一律走 `NetCmd`，结果以 `NetEvent` 回来。
-7. 每帧只做与"可见内容"成正比的工作：日志按可见行构建，表格按可视区取行（`C-08` §3）。
+依赖方向：`tui → app → {view, store, net} → protocol`。下层不引上层。
 
 ## 2. crate 清单
 
 | crate | 用途 | 备注 |
 |---|---|---|
-| `eframe` 0.32（`glow` 后端） | 窗口、事件循环、渲染 | Rust ≥ 1.85；0.37 的 UI-first 大改不追 |
-| `egui` | 控件与布局 | 与 eframe 同 minor，锁版本 |
-| `egui_extras` | 表格（`TableBuilder`） | M3 引入，与 egui 同版本 |
-| `egui_plot` | 交易行价格曲线 | M3 引入，与 egui 同版本 |
-| `tokio`（rt-multi-thread, macros, time, sync） | 运行时、定时器、通道 | 不引入 `full`，按需开 feature |
-| `tokio-tungstenite` + `rustls` | WebSocket 客户端 | 不依赖系统 OpenSSL |
-| `serde` / `serde_json` | 帧与载荷 | 未知字段默认忽略 |
-| `reqwest`（rustls, json） | `register` / `login` / `logout` | 只在 `net/http.rs` 用 |
-| `crossbeam-channel` | UI ↔ 网络线程通信 | 比 `std::mpsc` 多 select 能力 |
-| `anyhow` / `thiserror` | 错误上下文 | 网络层分类，UI 层兜底 |
-| `tracing` + `tracing-subscriber` | 日志落文件 | 排错靠它，不靠 println |
-| `dirs` | 配置与日志目录 | `config.toml`、token |
-| `toml` | 配置读写 | 只读写一个文件 |
-| `time` | 时间格式化 | 不用 `chrono`，只要 `HH:MM:SS` |
-| `egui_kittest`（dev，M2 起） | UI 快照与交互测试 | 官方 UI 测试工具，随 egui 版本 |
+| `ratatui` 0.29 | 布局、段落、样式、离屏 `TestBackend` | 只画字符，不碰显卡 |
+| `crossterm` 0.28 | 原始模式、按键事件、备用屏 | 三平台一致 |
+| `tokio` | 异步运行时 | 网络线程 |
+| `tokio-tungstenite` + `rustls` | WebSocket | 不依赖系统 OpenSSL |
+| `reqwest`（rustls, json） | 登录/注册/登出 | 只发三次 HTTP |
+| `serde` / `serde_json` | 协议编解码 | 未知字段忽略 |
+| `crossbeam-channel` | 网络 → UI 的事件队列 | 有界 4096，满了丢 |
+| `toml` | `config.toml` | 服务器地址、上次道号 |
+| `tracing` | 日志 | 写到 stderr，不干扰画面 |
+| `time` | 日期格式 | 倒计时与时刻 |
+| `unicode-width` | 显示列宽 | 与 ratatui 同一套算法，中文按 2 列对齐 |
+| `dirs` | 配置目录 | 三平台 |
 
-不引入：`arboard`（egui 自带复制/粘贴）、`chrono`、任何 WebView / JS 运行时、任何图标字体。
+依赖里没有渲染后端、图形库、资源打包工具：`cargo tree` 只有上面这些 crate，
+终端能力全部来自 `crossterm`；字形、列宽、颜色都由终端自己决定。
 
 ## 3. 目录
 
@@ -62,142 +55,113 @@ client/
 ├── Cargo.toml
 ├── Cargo.lock             入库（二进制项目）
 ├── docs/                  设计文档（本目录）
-├── assets/
-│   └── fonts/             可选：内置中文字体子集（SIL OFL；没有就走系统字体）
 ├── tools/doc-check.py     文档自查
+├── tools/ansi2png.py      --snapshot 的 ANSI 转 PNG
 └── src/
-    ├── main.rs            启动、配置、日志、字体、eframe::run_native
-    ├── config.rs          config.toml 读写、日志目录
-    ├── app.rs             eframe::App 实现：drain → Intent → NetCmd → 绘制
+    ├── main.rs            参数、配置、日志、进 tui::run 或 tui::snapshot
+    ├── config.rs          config.toml 读写
+    ├── app.rs             状态机：drain_net / on_key / intent / tick
+    ├── view.rs            View / Page / Intent / UiState / Toast（纯数据）
     ├── protocol/
-    │   ├── frame.rs       In / Out 帧、t / a / n / d
-    │   ├── action.rs      53 个动作名常量
-    │   ├── msg.rs         19 种服务端消息（serde tag = "t"）
-    │   ├── err.rs         错误码与关闭码
-    │   └── view.rs        state / map / battle / live 等视图结构
+    │   ├── frame.rs       帧信封
+    │   ├── action.rs      动作名常量
+    │   ├── msg.rs         服务端视图（state/map/battle/ready…）
+    │   └── err.rs         错误码与关闭码
     ├── net/
-    │   ├── mod.rs         NetCmd / NetEvent
-    │   ├── ws.rs          连接、hello、心搏、重连状态机
+    │   ├── mod.rs         NetCmd / NetEvent / ConnStatus
+    │   ├── ws.rs          连接、hello、心跳、重连状态机
     │   └── http.rs        register / login / logout
     ├── store/
-    │   ├── mod.rs         AppState、revision、订阅
-    │   ├── player.rs      角色 / 背包 / 技能
-    │   ├── world.rs       节点 / 分线 / 天气
-    │   ├── fight.rs       战斗与实时切磋
-    │   ├── social.rs      聊天 / 好友 / 邮件 / 队伍 / 宗门 / 市场
+    │   ├── mod.rs         AppState（单一可变源）
+    │   ├── player.rs      角色
+    │   ├── world.rs       节点
+    │   ├── mapgraph.rs    已探索地图（节点/边/布局）
     │   └── logbuf.rs      日志环形缓冲（5000 行）
-    ├── ui/
-    │   ├── mod.rs         root：顶栏 + 导航 + 主视图 + 输入栏
-    │   ├── theme.rs       颜色 / 字号 / 圆角 / 间距令牌
-    │   ├── fonts.rs       FontDefinitions 装载与回退链
-    │   ├── icons.rs       自绘图标（Painter 几何图形，不用图标字体）
-    │   ├── logview.rs     日志虚拟滚动、自动贴底、右键复制
-    │   ├── widgets/       状态条、出口行、血条、倒计时环、Toast、确认框
-    │   └── views/         login / create / fatal / game / character / bag / skills / social / market / sect / map / settings
+    ├── tui/
+    │   ├── mod.rs         终端初始化、事件循环、离屏快照
+    │   ├── render.rs      七段布局、数据页、舆图、Toast
+    │   ├── scene.rs       ASCII 场景生成（山/雨/人影/地面）
+    │   └── theme.rs       颜色、箭头、字符血条
     └── util/
         ├── time.rs        服务端时间偏移、倒计时
-        └── text.rs        截断、数字千分位、中文标点规整
+        └── text.rs        截断、千分位
 ```
 
 ## 4. 线程模型
 
-```
-主线程（winit / eframe）                         后台线程（tokio runtime）
-┌───────────────────────────────┐                ┌───────────────────────────┐
-│ update()                      │  NetCmd  ────► │ ws 写循环                 │
-│   1. drain NetEvent           │                │ ws 读循环 → NetEvent      │
-│   2. 更新 store / 生成 Intent │  ◄──── NetEvent│ tick（1s / 倒计时）        │
-│   3. ui::root(ctx, &state)    │                │ http（登录 / 建号）        │
-│   4. request_repaint 策略     │                └───────────────────────────┘
-└───────────────────────────────┘
-```
+- **主线程**：crossterm 事件轮询（30ms 超时）→ `app.on_key` → 绘制一帧。
+  没有渲染线程、没有 vsync，终端自己决定刷屏频率。
+- **网络线程**：tokio 多线程运行时，`net::ws::run` 一个任务串起登录、握手、心跳、重连。
+- **两条通道**：`NetCmd` 用 tokio unbounded（UI 同步发、网络异步收）；
+  `NetEvent` 用 crossbeam 有界 4096（网络发、UI 每帧 try_recv）。
+- **节奏**：主循环固定 30ms 一轮，网络事件与按键都在这一轮处理；一次最多消费 512 条事件，避免一帧卡死。
+- 断线重连在**网络线程**里做退避，主线程只负责把状态显示成"重连中"。
 
-- **egui 必须在主线程**：`eframe::run_native` 持有窗口与事件循环，所有 `ui` 代码都在 `update()` 里跑。
-- **tokio 在后台**：`main` 里建 runtime 并 `runtime.spawn(net::run(rx_cmd, tx_event, ctx.clone()))`；线程不退出，随进程结束。
-- **唤醒**：网络线程收到帧后 `ctx.request_repaint()`。`egui::Context` 是 `Arc` 且 `Send + Sync`，可以跨线程 clone。
-- **不共享锁**：`store` 只在主线程读写；网络线程不持有 `&mut AppState`。事件携带已解析的 `protocol::msg::In`，合并逻辑全在主线程。
-- **背压**：`NetCmd` 通道有界 64；`NetEvent` 有界 1024，满了说明 UI 卡住（属 bug，记 warn 并丢弃 `log` 类事件，**不丢 `state` / `battle` / `over`**）。
+## 5. 字符网格的写法约束
 
-## 5. 即时模式的写法约束
+- **全量重绘**：每轮画整屏。终端只有字符，增量更新的收益抵不过状态同步的复杂度。
+- **布局用 `Layout`**：七段固定；场景段用 `Min(5)` 吃掉剩余高度，窄终端不乱。
+- **只用 ASCII 画场景**：`/ \ _ : . = ~ ^ | * o`，保证任何终端等宽对齐；
+  中文只出现在 UI 文案里，由 ratatui 按 unicode-width 排版。
+- **宽字符**：中文占两列。需要定宽对齐时用 `pad_to`（按显示宽度补空格），
+  不用 `format!("{:<8}")`（它按字符数补）。
+- **不阻塞**：事件轮询 30ms 超时；网络从不 `await` 在 UI 线程里。
 
-egui 每帧重跑整棵 UI 代码，所以"状态"必须留在 `AppState` 与少量 UI 局部字段里，不能指望控件自己保存：
+## 6. 终端兼容与降级
 
-| 数据 | 放哪 | 说明 |
+- 需要 UTF-8 与备用屏（`EnterAlternateScreen`）；Windows Terminal / iTerm2 / xterm 均满足。
+- 真彩优先；`COLORTERM` 不是 `truecolor` 时 ratatui 自动降到 256 色，观感变差但可用。
+- 终端小于 80×24 时不报错，只把场景压到 5 行、见闻压到 3 行。
+- 退出时恢复原始模式与光标（`disable_raw_mode` + `LeaveAlternateScreen`），
+  异常路径也走 `Drop` 兜底。
+
+## 7. 字体与宽度
+
+- **不打包字体**：用终端自己的等宽字体。要求等宽 CJK（更纱黑体、等距更纱、
+  Menlo、Consolas + 中文回退均可）。
+- 中文宽度按 2 列计算，与 ratatui 一致；不做全角/半角转换。
+- 不需要 IME 处理：终端负责输入法，客户端只收已上屏字符。
+
+## 8. 颜色令牌（唯一色源）
+
+`tui/theme.rs` 是唯一的色源，别处不写 RGB 字面量。
+
+| 常量 | 值 | 用途 |
 |---|---|---|
-| 业务数据 | `store::AppState` | 服务端帧驱动，UI 只读 |
-| 当前页 / 滚动位置 / 筛选 | `ui::UiState` | 纯界面状态，不进 `store` |
-| 输入框文本 / 焦点 | `ui::UiState` 的 `String` + `egui::Id` | `TextEdit` 绑定 `&mut String` |
-| 每行日志的排版结果 | `ui::logview` 的按行缓存 | 缓存 `Arc<Galley>`，避免每帧重排 5000 行 |
-| 动画进度（战报淡入） | `ui::UiState` 的 `f32` + 起始时刻 | 用 `ctx.input(|i| i.time)` 算，不用 wall clock |
+| `BG` | `#050709` | 底色 |
+| `PANEL` | `#0A0D10` | 顶栏/提示条 |
+| `TEXT` | `#E2E2D6` | 正文 |
+| `DIM` / `FAINT` | `#78828A` / `#464E56` | 弱化两级 |
+| `ACCENT` | `#7FD1C1` | 交互、真气 |
+| `GOLD` | `#D9B36A` | 收益、修为、地名 |
+| `BAD` | `#C4553D` | 损失、气血、错误 |
+| `GOOD` | `#6FBF73` | 回复、成功 |
+| `WARN` | `#C9A227` | 重连、提示 |
 
-硬规则：
-
-1. 不在 `update()` 里 `sleep`、`block_on`、读文件（配置只在启动与显式保存时读写）。
-2. 不用 `std::thread::spawn` 起临时线程做业务；需要异步就走 `NetCmd`。
-3. 控件 ID 显式给：列表行用 `ui.push_id(key, ...)`，否则滚动时状态会串行。
-4. 长列表一律虚拟化：`ScrollArea::show_rows` / `TableBuilder::body.rows`，不 `for` 全量建控件。
-
-## 6. 渲染后端与兜底
-
-- 默认 **glow**（OpenGL 3.3）：三平台驱动覆盖最广，远程桌面也能跑。
-- 想要 wgpu（DX12/Vulkan/Metal）：在 `Cargo.toml` 打开 eframe 的 `wgpu` feature，`--renderer wgpu` 才生效。
-- 初始化失败：启动时弹原生错误框并写 `logs/panic.log`，提示更新显卡驱动。
-- 不静默降级到软件渲染：软件渲染下 60fps 撑不住，体验比报错更糟。
-
-## 7. 资源与字体
-
-- **中文必须显式装载**：egui 默认字体不含 CJK。`ui/fonts.rs` 先找 `assets/fonts/NotoSansSC-Regular.subset.otf`，
-  找不到就读系统字体（Windows `msyh.ttc`、macOS `PingFang.ttc`、Linux `NotoSansCJK`）。
-  发布版建议把子集字体编进二进制，避免三平台字形差异（裁剪命令见 `assets/fonts/README.md`）。
-- 子集范围：GB2312 一级+二级汉字（6763）、ASCII、常用中文标点、`·—…「」《》`、`⏵ ✕ ✓` 等界面符号；预估 2–3MB/字重。
-  裁剪命令记在 `assets/fonts/README.md`（`pyftsubset --text-file=charset.txt`）。
-- 回退链：`SC Regular` → egui 默认字体（拉丁与符号）→ 系统字体。缺字时不许出现"豆腐块"：`ui::fonts` 启动自检，
-  用一段覆盖全字符集的样例文本测 `ctx.fonts` 的 `has_glyph`，缺字记 warn 并列出码位。
-- 许可证：SIL OFL 1.1，`assets/fonts/LICENSE.txt` 随仓库；打包时不需要额外分发字体文件（已内嵌）。
-
-## 8. 主题令牌（唯一色源）
-
-`ui/theme.rs` 定义语义色，`ui` 各处只引令牌，不写字面量：
-
-| 令牌 | 深色（默认） | 用途 |
-|---|---|---|
-| `bg` | `#14161A` | 窗口底 |
-| `panel` | `#1B1E24` | 面板/卡片 |
-| `panel_hi` | `#232830` | 悬停/选中 |
-| `line` | `#2E343D` | 分隔线、边框 |
-| `text` | `#E6E8EB` | 正文 |
-| `text_dim` | `#9AA0A6` | 次要信息 |
-| `accent` | `#45C8DC` | 主色（青，交互/高亮） |
-| `good` | `#4CAF50` | 正向（气血、成功） |
-| `bad` | `#E5484D` | 负向（受伤、错误） |
-| `warn` | `#C9A227` | 旁白、警告、门槛不足 |
-| `gold` | `#D4A64A` | 灵石、奖励 |
-
-日志类型到令牌的映射固定在 `ui/logview.rs`：`sys→text_dim`、`nar→warn`、`combat→text`、`good→good`、`bad→bad`。
-浅色主题在 M5 提供，令牌名不变，只换值。
+日志类型到颜色的映射只在 `theme::tone` 一处。
 
 ## 9. 配置与本地文件
 
 | 文件 | 位置 | 内容 |
 |---|---|---|
-| `config.toml` | `dirs::config_dir()/xiuxian-client/` | `server`、`ui_scale`、`theme`、`log_timestamps`、`last_name` |
+| `config.toml` | `dirs::config_dir()/xiuxian-client/` | `server`、`last_name`、`show_timestamps` |
 | `token` | 同目录，权限 600 | 登录 token；勾"记住我"才写 |
 | `logs/client.log` | `dirs::data_local_dir()/xiuxian-client/logs/` | tracing 滚动日志（7 天） |
 | `logs/decode.log` | 同上 | 解析失败的原始帧（最多 10 条/会话） |
 
-命令行覆盖：`--server`、`--renderer`、`--replay`、`--snapshot`、`--log-level`。
+命令行覆盖：`--server`、`--login`、`--create`、`--page`、`--move`、`--snapshot`、`--log-level`。
 
 ## 10. 关键取舍
 
 | 取舍 | 选择 | 理由 |
 |---|---|---|
-| UI 框架 | egui（即时模式） | 面板多但结构浅；不需要组件树与消息映射；帧驱动天然对齐 |
-| 布局 | 手写 `SidePanel` / `CentralPanel` / `TopBottomPanel` | 比引入 docking 库稳定；M5 再考虑可拖拽分栏 |
-| 日志 | 环形缓冲 5000 行 + 可见行排版缓存 | `C-08` 的上限；不整屏重排 |
-| 图标 | `Painter` 画几何图形 | 不额外带图标字体；缩放不失真 |
-| 图表 | `egui_plot` | 价格曲线只需要折线与悬停提示 |
-| 错误处理 | 网络/JSON 全 `Result`；UI 只展示可读文案 | panic 会让窗口直接消失，比终端更难看 |
-| 发布 | 单 exe + 内嵌字体与图标 | 用户侧零安装；不需要资源目录 |
+| UI 框架 | ratatui（立即模式 + 双缓冲） | 布局、段落、颜色都是现成的；`TestBackend` 能离屏出图 |
+| 布局 | 七段 `Layout::vertical` | 终端里固定结构最稳；不做浮动面板 |
+| 场景 | 纯函数生成字符网格 | 无资源、可测试；同一尺寸下结果确定 |
+| 日志 | 环形缓冲 5000 行 + 每帧只渲染可见行 | `C-08` 的上限 |
+| 图表 | 不做 | 终端画不出有意义的曲线；M5 用文本表格代替 |
+| 错误处理 | 网络/JSON 全 `Result`；UI 只展示可读文案 | panic 会打乱终端状态（原始模式 + 备用屏），必须先恢复再退出 |
+| 发布 | 单二进制，无资源 | 拷走就能跑，SSH 也能跑 |
 
 ## 11. 与服务端的一致性
 

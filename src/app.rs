@@ -1,77 +1,63 @@
-//! `eframe::App` 实现：每帧 drain 事件 → 更新 store → 画一帧 → 处理 Intent。
+//! 应用状态机：键盘 → Intent → 网络命令；网络事件 → 状态 → 重绘。
+//!
+//! 这一层不碰终端，也不碰协议细节：方便单测与替换渲染层。
 
 use crossbeam_channel::Receiver;
-use eframe::egui;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::config::Config;
 use crate::net::{self, ConnStatus, NetCmd, NetEvent};
 use crate::protocol::action;
+use crate::protocol::err;
 use crate::protocol::msg::LogLine;
 use crate::store::AppState;
-use crate::ui::{self, Intent, Page, UiState, View, fonts, theme};
 use crate::util::text::truncate_chars;
 use crate::util::time;
+use crate::view::{Intent, Page, UiState, View};
 
-pub struct ClientApp {
-    state: AppState,
-    ui: UiState,
-    cfg: Config,
+pub struct App {
+    pub state: AppState,
+    pub ui: UiState,
+    pub cfg: Config,
+    pub quit: bool,
+    /// 日志向上翻了几行（0 = 贴底）。
+    pub log_back: usize,
     tx: UnboundedSender<NetCmd>,
     rx: Receiver<NetEvent>,
     rt: Option<tokio::runtime::Runtime>,
-    /// 登录/建号提交时刻，用于 12 秒无响应兜底。
     submit_at: i64,
-    /// 待自动登录的凭据（`--login 道号:密码`）。
     pending_login: Option<(String, String)>,
-    /// 待自动建号的道号（`--create`）。
     pending_create: Option<String>,
-    /// `--page`：首次进入主界面时打开这一页（之后清空，不影响正常切页）。
     preferred_page: Option<Page>,
-    /// `--move n`：拿到地图后自动走第 n 个出口（联调/截图用）。
+    /// `--move n`：进主界面后自动走第 n 个出口。
     pending_move: Option<usize>,
-    /// `--snapshot <path>`：启动 5 秒后抓一帧存 PNG 并退出。
-    snapshot_path: Option<std::path::PathBuf>,
-    snapshot_frames: u32,
 }
 
-impl ClientApp {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        theme::apply(&cc.egui_ctx);
-        let font_source = fonts::install(&cc.egui_ctx);
-        cc.egui_ctx.set_zoom_factor(1.0);
-
-        let cfg = Config::load();
-        let mut ui = UiState::default();
-        ui.login.server = cfg.server.clone();
-        ui.login.name = cfg.last_name.clone();
-        ui.show_timestamps = cfg.show_timestamps;
-        ui.ui_scale = if cfg.ui_scale > 0.0 {
-            cfg.ui_scale
-        } else {
-            1.0
-        };
-        ui.font_source = font_source;
-        cc.egui_ctx.set_zoom_factor(ui.ui_scale);
-
+impl App {
+    pub fn new(cfg: Config) -> Self {
         let rt = tokio::runtime::Builder::new_multi_thread()
             .worker_threads(2)
             .enable_all()
             .thread_name("xiuxian-net")
             .build()
             .expect("tokio runtime 初始化失败");
-
         let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (ev_tx, ev_rx) = crossbeam_channel::bounded(2048);
-        let ctx = cc.egui_ctx.clone();
+        let (ev_tx, ev_rx) = crossbeam_channel::bounded(4096);
         rt.spawn(async move {
-            net::ws::run(ctx, cmd_rx, ev_tx).await;
+            net::ws::run(cmd_rx, ev_tx).await;
         });
+
+        let mut ui = UiState::default();
+        ui.login.server = cfg.server.clone();
+        ui.login.name = cfg.last_name.clone();
 
         Self {
             state: AppState::default(),
             ui,
             cfg,
+            quit: false,
+            log_back: 0,
             tx: cmd_tx,
             rx: ev_rx,
             rt: Some(rt),
@@ -80,24 +66,23 @@ impl ClientApp {
             pending_create: None,
             preferred_page: None,
             pending_move: None,
-            snapshot_path: None,
-            snapshot_frames: 0,
         }
     }
 
-    /// 开发/联调：启动后自动用给定凭据登录。
     pub fn auto_login(&mut self, name: String, pass: String) {
         self.ui.login.name = name.clone();
         self.ui.login.pass = pass.clone();
         self.pending_login = Some((name, pass));
     }
 
-    /// 开发/联调：登录后如果还没有角色，自动建号。
     pub fn auto_create(&mut self, name: String) {
         self.pending_create = Some(name);
     }
 
-    /// 开发/联调：直接打开某一页（`game`/`character`/`bag`/`skills`/`social`/`market`/`sect`/`map`/`settings`）。
+    pub fn auto_move(&mut self, index: usize) {
+        self.pending_move = Some(index);
+    }
+
     pub fn start_page(&mut self, name: &str) {
         self.ui.page = match name {
             "character" => Page::Character,
@@ -113,30 +98,18 @@ impl ClientApp {
         self.preferred_page = Some(self.ui.page);
     }
 
-    /// 开发/联调：拿到地图后自动走第 n 个出口。
-    pub fn auto_move(&mut self, index: usize) {
-        self.pending_move = Some(index);
+    /// 发一个动作：统一在这里记日志，排查"到底发了什么"时只看这一处。
+    fn act(&mut self, a: &str, d: serde_json::Value) {
+        tracing::debug!("→ {a} {d}");
+        let _ = self.tx.send(NetCmd::Act { a: a.into(), d });
     }
 
-    /// 开发/联调：主界面出来后抓一帧存 PNG，然后退出。
-    pub fn snapshot_to(&mut self, path: std::path::PathBuf) {
-        self.snapshot_path = Some(path);
-    }
-
-    /// 命令行 `--server` 覆盖配置文件里的地址。
-    pub fn apply_server_override(&mut self, server: &str) {
-        if !server.is_empty() {
-            self.ui.login.server = server.to_string();
-        }
-    }
-
-    fn drain_events(&mut self) {
+    pub fn drain_net(&mut self) {
         let mut n = 0;
         while let Ok(ev) = self.rx.try_recv() {
-            n += 1;
             self.handle_event(ev);
+            n += 1;
             if n > 512 {
-                // 单帧最多处理 512 条，避免一帧卡死；剩下的下一帧继续。
                 break;
             }
         }
@@ -150,11 +123,8 @@ impl ClientApp {
                 match &s {
                     ConnStatus::Online => {
                         self.ui.login.loading = false;
-                        if self.ui.view != View::Fatal {
-                            // ready 决定进主界面还是建号页；这里只在已有角色时兜底。
-                            if self.ui.view == View::Login && self.state.has_char {
-                                self.ui.view = View::Main;
-                            }
+                        if self.ui.view == View::Login && self.state.has_char {
+                            self.ui.view = View::Main;
                         }
                     }
                     ConnStatus::Offline(msg) => {
@@ -181,14 +151,6 @@ impl ClientApp {
             }
             NetEvent::Ready(r) => {
                 self.state.apply_ready(&r);
-                if !r.has_character()
-                    && let Some(name) = self.pending_create.take()
-                {
-                    let _ = self.tx.send(NetCmd::Act {
-                        a: action::CREATE.into(),
-                        d: serde_json::json!({ "name": name }),
-                    });
-                }
                 self.ui.login.loading = false;
                 self.ui.view = if r.has_character() {
                     View::Main
@@ -196,19 +158,15 @@ impl ClientApp {
                     View::Create
                 };
                 if r.has_character() {
-                    // Ready 会重置到游戏页；`--page` 指定的页在这一步补回来。
                     self.ui.page = self.preferred_page.take().unwrap_or(Page::Game);
                     self.ui.selected_exit = 0;
-                    // ready 不带地图视图，主动拉一次当前节点。
-                    let _ = self.tx.send(NetCmd::Act {
-                        a: action::WORLD_MAP.into(),
-                        d: serde_json::json!({}),
-                    });
+                    self.act(action::WORLD_MAP, serde_json::json!({}));
+                }
+                if let (false, Some(name)) = (r.has_character(), self.pending_create.take()) {
+                    self.act(action::CREATE, serde_json::json!({ "name": name }));
                 }
             }
             NetEvent::State(p) => {
-                // 到达/被传送后 loc 会变，但服务端只推 state + log：
-                // 客户端要主动拉一次当前节点，否则界面停在旧地名上。
                 let moved = self
                     .state
                     .player
@@ -217,14 +175,14 @@ impl ClientApp {
                     .unwrap_or(false);
                 self.state.apply_state(&p);
                 if moved {
-                    let _ = self.tx.send(NetCmd::Act {
-                        a: action::WORLD_MAP.into(),
-                        d: serde_json::json!({}),
-                    });
+                    self.act(action::WORLD_MAP, serde_json::json!({}));
                 }
             }
             NetEvent::Vital(v) => self.state.apply_vital(&v),
-            NetEvent::Log(lines) => self.state.push_logs(lines),
+            NetEvent::Log(lines) => {
+                self.state.push_logs(lines);
+                self.log_back = 0;
+            }
             NetEvent::Map(m) => {
                 self.state.apply_map(&m);
                 self.ui.selected_exit = 0;
@@ -232,10 +190,8 @@ impl ClientApp {
                     && let Some(ex) = m.exits.get(i)
                     && ex.ok
                 {
-                    let _ = self.tx.send(NetCmd::Act {
-                        a: action::MOVE.into(),
-                        d: serde_json::json!({ "to": ex.to }),
-                    });
+                    let to = ex.to.clone();
+                    self.act(action::MOVE, serde_json::json!({ "to": to }));
                 }
             }
             NetEvent::Chat(c) => {
@@ -253,14 +209,19 @@ impl ClientApp {
                     s: truncate_chars(&line, 512),
                 }]);
                 self.state.push_chat(*c);
+                self.log_back = 0;
             }
             NetEvent::Presence(count) => self.state.presence = count,
-            NetEvent::Battle(b) => {
-                self.state.battle = Some(*b);
-            }
+            NetEvent::Battle(b) => self.state.battle = Some(*b),
             NetEvent::Ack { .. } => {}
             NetEvent::Err { code, msg, .. } => {
                 self.ui.login.loading = false;
+                // 建号竞态：create 刚落库时若先到的 worldMap 被服务端判成"还没角色"，
+                // 这不是用户的错，紧跟其后的 ready/state 会把画面补齐，所以不弹红条。
+                if code == err::E_NOCHAR {
+                    tracing::debug!("建号尚未就绪，忽略 E-NOCHAR");
+                    return;
+                }
                 self.ui.toast(format!("{msg}（{code}）"), true);
                 if self.ui.view == View::Login {
                     self.ui.login.error = msg;
@@ -281,8 +242,8 @@ impl ClientApp {
         }
     }
 
-    fn handle_intent(&mut self, intent: Intent, ctx: &egui::Context) {
-        match intent {
+    pub fn intent(&mut self, it: Intent) {
+        match it {
             Intent::Login { register } => {
                 let server = self.ui.login.server.trim().to_string();
                 let name = self.ui.login.name.trim().to_string();
@@ -305,67 +266,43 @@ impl ClientApp {
             }
             Intent::Create(name) => {
                 self.submit_at = time::now_ms();
-                let _ = self.tx.send(NetCmd::Act {
-                    a: action::CREATE.into(),
-                    d: serde_json::json!({ "name": name }),
-                });
+                self.act(action::CREATE, serde_json::json!({ "name": name }));
             }
             Intent::Move(to) => {
-                if !self.online() {
-                    return;
+                if self.online() {
+                    self.act(action::MOVE, serde_json::json!({ "to": to }));
                 }
-                let _ = self.tx.send(NetCmd::Act {
-                    a: action::MOVE.into(),
-                    d: serde_json::json!({ "to": to }),
-                });
             }
             Intent::Explore => {
-                if !self.online() {
-                    return;
+                if self.online() {
+                    let region = self
+                        .state
+                        .world
+                        .get()
+                        .map(|m| m.region.clone())
+                        .unwrap_or_default();
+                    self.act(action::EXPLORE, serde_json::json!({ "region": region }));
                 }
-                let region = self
-                    .state
-                    .world
-                    .get()
-                    .map(|m| m.region.clone())
-                    .unwrap_or_default();
-                let _ = self.tx.send(NetCmd::Act {
-                    a: action::EXPLORE.into(),
-                    d: serde_json::json!({ "region": region }),
-                });
             }
             Intent::Cultivate(on) => {
-                if !self.online() {
-                    return;
+                if self.online() {
+                    self.act(action::CULTIVATE, serde_json::json!({ "on": on }));
                 }
-                let _ = self.tx.send(NetCmd::Act {
-                    a: action::CULTIVATE.into(),
-                    d: serde_json::json!({ "on": on }),
-                });
             }
             Intent::Breakthrough => {
-                if !self.online() {
-                    return;
+                if self.online() {
+                    self.act(action::BREAKTHROUGH, serde_json::json!({}));
                 }
-                let _ = self.tx.send(NetCmd::Act {
-                    a: action::BREAKTHROUGH.into(),
-                    d: serde_json::json!({}),
-                });
             }
             Intent::Look => {
-                if !self.online() {
-                    return;
+                if self.online() {
+                    self.act(action::LOOK, serde_json::json!({}));
                 }
-                let _ = self.tx.send(NetCmd::Act {
-                    a: action::LOOK.into(),
-                    d: serde_json::json!({}),
-                });
             }
             Intent::Chat { ch, to, text } => {
-                if !self.online() {
-                    return;
+                if self.online() {
+                    let _ = self.tx.send(NetCmd::Chat { ch, to, text });
                 }
-                let _ = self.tx.send(NetCmd::Chat { ch, to, text });
             }
             Intent::Logout => {
                 let _ = self.tx.send(NetCmd::Logout);
@@ -374,177 +311,250 @@ impl ClientApp {
                 self.ui.login.loading = false;
                 self.ui.page = Page::Game;
             }
-            Intent::Quit => {
-                let _ = self.tx.send(NetCmd::Shutdown);
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            }
-            Intent::Local => {
-                self.cfg.ui_scale = self.ui.ui_scale;
-                self.cfg.show_timestamps = self.ui.show_timestamps;
-                self.cfg.save();
-            }
         }
-    }
-
-    /// 等主界面与地图都就绪，再走 30 帧让布局稳定，然后请求截图。
-    fn tick_snapshot(&mut self, ctx: &egui::Context) {
-        // 截图事件：拿到图就落盘并退出。
-        let shot = ctx.input(|i| {
-            i.events.iter().find_map(|e| {
-                if let egui::Event::Screenshot { image, .. } = e {
-                    Some(image.clone())
-                } else {
-                    None
-                }
-            })
-        });
-        if let Some(img) = shot
-            && let Some(path) = self.snapshot_path.take()
-        {
-            let [w, h] = img.size;
-            let mut buf = Vec::with_capacity(w * h * 4);
-            for px in &img.pixels {
-                buf.extend_from_slice(&[px.r(), px.g(), px.b(), px.a()]);
-            }
-            match image::save_buffer(&path, &buf, w as u32, h as u32, image::ColorType::Rgba8) {
-                Ok(()) => tracing::info!("截图已保存：{}", path.display()),
-                Err(e) => tracing::error!("截图保存失败：{e}"),
-            }
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            return;
-        }
-
-        let Some(_) = self.snapshot_path else { return };
-        // 不再等"主界面 + 地图都就绪"：按帧计数，5 秒后截当前画面。
-        // 自动登录通常 2 秒内就到主界面；登录页截图也能用。
-        self.snapshot_frames += 1;
-        if self.snapshot_frames >= 300 {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
-            self.snapshot_frames = 0;
-            self.snapshot_path = self.snapshot_path.take(); // 只截一次
-        }
-        ctx.request_repaint();
     }
 
     fn online(&self) -> bool {
         matches!(self.state.conn, ConnStatus::Online)
     }
 
-    fn shortcuts(&mut self, ctx: &egui::Context, out: &mut Vec<Intent>) {
-        if self.ui.view != View::Main {
+    pub fn on_key(&mut self, k: KeyEvent) {
+        if k.modifiers.contains(KeyModifiers::CONTROL) && k.code == KeyCode::Char('c') {
+            self.quit = true;
             return;
         }
-        let typing = ctx.wants_keyboard_input();
-        let key = |k: egui::Key| ctx.input(|i| i.key_pressed(k));
-
-        if key(egui::Key::Escape) {
-            if typing {
-                ctx.memory_mut(|m| m.surrender_focus(egui::Id::NULL));
-            } else {
-                self.ui.page = Page::Game;
+        match self.ui.view {
+            View::Login => self.key_login(k),
+            View::Create => self.key_create(k),
+            View::Fatal => {
+                if matches!(k.code, KeyCode::Char('q') | KeyCode::Esc | KeyCode::Enter) {
+                    self.quit = true;
+                }
             }
-        }
-        if typing {
-            return;
-        }
-
-        let pages = [
-            (egui::Key::F1, Page::Character),
-            (egui::Key::F2, Page::Bag),
-            (egui::Key::F3, Page::Skills),
-            (egui::Key::F4, Page::Social),
-            (egui::Key::F5, Page::Market),
-            (egui::Key::F6, Page::Sect),
-            (egui::Key::F7, Page::Map),
-            (egui::Key::F8, Page::Settings),
-        ];
-        for (k, p) in pages {
-            if key(k) {
-                self.ui.page = p;
-            }
-        }
-        if self.ui.page != Page::Game {
-            return;
-        }
-        if key(egui::Key::Space) {
-            out.push(Intent::Explore);
-        }
-        if key(egui::Key::C) {
-            out.push(Intent::Cultivate(!self.state.vitals.cultivating));
-        }
-        if key(egui::Key::B) && self.state.battle.is_some() {
-            let _ = self.tx.send(NetCmd::Act {
-                a: action::BATTLE.into(),
-                d: serde_json::json!({ "op": "attack" }),
-            });
+            View::Main => self.key_main(k),
         }
     }
 
-    /// 需要下一帧重绘的依据：动画、倒计时、退避。
-    fn repaint_after(&self) -> Option<std::time::Duration> {
-        if !self.ui.toasts.is_empty() {
-            return Some(std::time::Duration::from_millis(120));
-        }
-        if matches!(self.state.conn, ConnStatus::Backoff { .. }) {
-            return Some(std::time::Duration::from_millis(500));
-        }
-        if let Some(t) = self.state.player.get().and_then(|p| p.travel.as_ref()) {
-            let left = t.arrive_at - self.state.server_now();
-            if left > 0 {
-                return Some(std::time::Duration::from_millis(500));
+    fn key_login(&mut self, k: KeyEvent) {
+        let focus = self.ui.login.focus;
+        match k.code {
+            KeyCode::Tab | KeyCode::Down => self.ui.login.focus = (focus + 1) % 3,
+            KeyCode::Up => self.ui.login.focus = (focus + 2) % 3,
+            KeyCode::Enter => {
+                let register = self.ui.login.register;
+                self.intent(Intent::Login { register });
             }
+            KeyCode::Char('r') if k.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.ui.login.register = !self.ui.login.register;
+                self.ui.login.error.clear();
+            }
+            KeyCode::Char(c) => {
+                let target = match focus {
+                    0 => &mut self.ui.login.server,
+                    1 => &mut self.ui.login.name,
+                    _ => &mut self.ui.login.pass,
+                };
+                target.push(c);
+            }
+            KeyCode::Backspace => {
+                let target = match focus {
+                    0 => &mut self.ui.login.server,
+                    1 => &mut self.ui.login.name,
+                    _ => &mut self.ui.login.pass,
+                };
+                target.pop();
+            }
+            _ => {}
         }
-        if self.state.vitals.cultivating {
-            return Some(std::time::Duration::from_millis(1000));
-        }
-        None
     }
-}
 
-impl eframe::App for ClientApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.drain_events();
-        self.tick_snapshot(ctx);
+    fn key_create(&mut self, k: KeyEvent) {
+        match k.code {
+            KeyCode::Enter => {
+                let name = self.ui.create_name.trim().to_string();
+                if (2..=8).contains(&name.chars().count()) {
+                    self.intent(Intent::Create(name));
+                } else {
+                    self.ui.toast("道号长度需在 2–8 个字符之间", true);
+                }
+            }
+            KeyCode::Char(c) => self.ui.create_name.push(c),
+            KeyCode::Backspace => {
+                self.ui.create_name.pop();
+            }
+            _ => {}
+        }
+    }
 
-        // 提交后 12 秒没有任何回音，恢复按钮，避免"永远转圈"。
+    fn key_main(&mut self, k: KeyEvent) {
+        if self.ui.typing {
+            match k.code {
+                KeyCode::Enter => {
+                    let text = self.ui.chat_text.trim().to_string();
+                    if !text.is_empty() {
+                        let it = Intent::Chat {
+                            ch: self.ui.chat_ch.clone(),
+                            to: if self.ui.chat_ch == "dm" {
+                                Some(self.ui.chat_to.trim().to_string())
+                            } else {
+                                None
+                            },
+                            text,
+                        };
+                        self.intent(it);
+                    }
+                    self.ui.chat_text.clear();
+                    self.ui.typing = false;
+                    self.ui.chat_stick = true;
+                    self.log_back = 0;
+                }
+                KeyCode::Esc => {
+                    self.ui.chat_text.clear();
+                    self.ui.typing = false;
+                }
+                KeyCode::Char(c) => self.ui.chat_text.push(c),
+                KeyCode::Backspace => {
+                    self.ui.chat_text.pop();
+                }
+                KeyCode::Tab => {
+                    self.ui.chat_ch = match self.ui.chat_ch.as_str() {
+                        "world" => "region".into(),
+                        "region" => "party".into(),
+                        "party" => "dm".into(),
+                        _ => "world".into(),
+                    };
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        if let KeyCode::F(n) = k.code
+            && let Some(p) = Page::from_fn_key(n)
+        {
+            self.ui.page = p;
+            return;
+        }
+
+        match k.code {
+            KeyCode::Esc => {
+                if self.ui.page != Page::Game {
+                    self.ui.page = Page::Game;
+                }
+            }
+            KeyCode::Char('q') => self.quit = true,
+            KeyCode::Char('/') => {
+                self.ui.typing = true;
+                self.ui.chat_text.clear();
+            }
+            KeyCode::Char(' ') => self.intent(Intent::Explore),
+            KeyCode::Char('c') => {
+                let on = !self.state.vitals.cultivating;
+                self.intent(Intent::Cultivate(on));
+            }
+            KeyCode::Char('b') => self.intent(Intent::Breakthrough),
+            KeyCode::Char('l') => self.intent(Intent::Look),
+            KeyCode::Char('o') => self.intent(Intent::Logout),
+            KeyCode::Up | KeyCode::Char('k') => {
+                let n = self.state.world.get().map(|m| m.exits.len()).unwrap_or(0);
+                if n > 0 {
+                    self.ui.selected_exit = (self.ui.selected_exit + n - 1) % n;
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                let n = self.state.world.get().map(|m| m.exits.len()).unwrap_or(0);
+                if n > 0 {
+                    self.ui.selected_exit = (self.ui.selected_exit + 1) % n;
+                }
+            }
+            KeyCode::Enter => {
+                if let Some(m) = self.state.world.get()
+                    && let Some(ex) = m.exits.get(self.ui.selected_exit)
+                    && ex.ok
+                {
+                    let to = ex.to.clone();
+                    self.intent(Intent::Move(to));
+                }
+            }
+            KeyCode::PageUp => {
+                let max = self.state.logs.len().saturating_sub(1);
+                self.log_back = (self.log_back + 5).min(max);
+            }
+            KeyCode::PageDown => {
+                self.log_back = self.log_back.saturating_sub(5);
+            }
+            KeyCode::Home => {
+                let max = self.state.logs.len().saturating_sub(1);
+                self.log_back = max;
+            }
+            KeyCode::End => self.log_back = 0,
+            _ => {}
+        }
+    }
+
+    pub fn tick(&mut self) {
         if self.ui.login.loading && self.submit_at > 0 && time::now_ms() - self.submit_at > 12_000 {
             self.ui.login.loading = false;
             self.ui.login.error = "服务端没有响应，请检查地址与网络".into();
         }
-
+        self.ui.prune_toasts();
         if let Some((name, pass)) = self.pending_login.take()
             && self.ui.view == View::Login
             && !self.ui.login.loading
         {
-            {
-                self.ui.login.loading = true;
-                self.ui.login.error.clear();
-                self.submit_at = time::now_ms();
-                let server = self.ui.login.server.clone();
-                let _ = self.tx.send(NetCmd::Login {
-                    server,
-                    name,
-                    pass,
-                    register: false,
-                });
-            }
-        }
-
-        let mut out: Vec<Intent> = Vec::new();
-        self.shortcuts(ctx, &mut out);
-        ui::root(ctx, &mut self.ui, &self.state, &mut out);
-        for it in out {
-            self.handle_intent(it, ctx);
-        }
-        if let Some(d) = self.repaint_after() {
-            ctx.request_repaint_after(d);
+            self.ui.login.loading = true;
+            self.ui.login.error.clear();
+            self.submit_at = time::now_ms();
+            let server = self.ui.login.server.clone();
+            let _ = self.tx.send(NetCmd::Login {
+                server,
+                name,
+                pass,
+                register: false,
+            });
         }
     }
 
-    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+    pub fn shutdown(&mut self) {
         let _ = self.tx.send(NetCmd::Shutdown);
         if let Some(rt) = self.rt.take() {
             rt.shutdown_timeout(std::time::Duration::from_millis(200));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::view::Page;
+
+    fn key(c: KeyCode) -> KeyEvent {
+        KeyEvent::new(c, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn slash_starts_typing_and_esc_cancels() {
+        let mut app = App::new(Config::default());
+        app.ui.view = View::Main;
+        app.on_key(key(KeyCode::Char('/')));
+        assert!(app.ui.typing);
+        app.on_key(key(KeyCode::Char('你')));
+        app.on_key(key(KeyCode::Char('好')));
+        assert_eq!(app.ui.chat_text, "你好");
+        app.on_key(key(KeyCode::Esc));
+        assert!(!app.ui.typing);
+        assert!(app.ui.chat_text.is_empty());
+        app.shutdown();
+    }
+
+    #[test]
+    fn f_keys_switch_pages_and_esc_returns() {
+        let mut app = App::new(Config::default());
+        app.ui.view = View::Main;
+        app.on_key(key(KeyCode::F(2)));
+        assert_eq!(app.ui.page, Page::Bag);
+        app.on_key(key(KeyCode::Esc));
+        assert_eq!(app.ui.page, Page::Game);
+        app.shutdown();
     }
 }

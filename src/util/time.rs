@@ -15,6 +15,7 @@ fn offset() -> UtcOffset {
 }
 
 /// 毫秒时间戳 → `HH:MM:SS`。
+#[allow(dead_code)] // 日志时刻，留给 M5 的检索视图
 pub fn fmt_hms(ts_ms: i64) -> String {
     let secs = ts_ms.div_euclid(1000);
     let Ok(dt) = OffsetDateTime::from_unix_timestamp(secs) else {

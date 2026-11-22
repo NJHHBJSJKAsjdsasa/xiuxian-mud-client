@@ -1,12 +1,5 @@
-//! 界面层：只读 `store`，只发 `Intent`。不碰 socket、不发动作帧。
+//! 视图状态与用户意图：纯数据，不依赖任何 UI 框架。
 
-pub mod fonts;
-pub mod mapview;
-pub mod scene;
-pub mod theme;
-pub mod views;
-
-use crate::store::AppState;
 use crate::util::time;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,12 +30,27 @@ impl Page {
             Page::Character => "角色",
             Page::Bag => "背包",
             Page::Skills => "技能",
-            Page::Social => "社交",
-            Page::Market => "交易",
+            Page::Social => "江湖",
+            Page::Market => "坊市",
             Page::Sect => "宗门",
-            Page::Map => "地图",
+            Page::Map => "舆图",
             Page::Settings => "设置",
         }
+    }
+
+    /// F1–F8 对应表（游戏页用 Esc 回）。
+    pub fn from_fn_key(n: u8) -> Option<Page> {
+        Some(match n {
+            1 => Page::Character,
+            2 => Page::Bag,
+            3 => Page::Skills,
+            4 => Page::Social,
+            5 => Page::Market,
+            6 => Page::Sect,
+            7 => Page::Map,
+            8 => Page::Settings,
+            _ => return None,
+        })
     }
 }
 
@@ -63,9 +71,6 @@ pub enum Intent {
     },
     Look,
     Logout,
-    Quit,
-    /// 客户端本地设置变更，不需要发网络。
-    Local,
 }
 
 pub struct Toast {
@@ -82,6 +87,8 @@ pub struct LoginForm {
     pub register: bool,
     pub loading: bool,
     pub error: String,
+    /// 当前在编辑第几个输入框（0 服务器 / 1 道号 / 2 密码）。
+    pub focus: usize,
 }
 
 impl Default for LoginForm {
@@ -93,6 +100,7 @@ impl Default for LoginForm {
             register: false,
             loading: false,
             error: String::new(),
+            focus: 0,
         }
     }
 }
@@ -105,16 +113,12 @@ pub struct UiState {
     pub chat_ch: String,
     pub chat_to: String,
     pub chat_text: String,
-    /// 对白框是否贴着最新一行。
+    /// 是否处于聊天输入模式（Enter 提交、Esc 取消）。
+    pub typing: bool,
     pub chat_stick: bool,
     pub selected_exit: usize,
     pub toasts: Vec<Toast>,
-    pub show_timestamps: bool,
-    pub ui_scale: f32,
     pub fatal: String,
-    pub font_source: String,
-    /// 舆图的平移与缩放。
-    pub map_view: mapview::MapUiState,
 }
 
 impl Default for UiState {
@@ -127,14 +131,11 @@ impl Default for UiState {
             chat_ch: "world".into(),
             chat_to: String::new(),
             chat_text: String::new(),
+            typing: false,
             chat_stick: true,
             selected_exit: 0,
             toasts: Vec::new(),
-            show_timestamps: true,
-            ui_scale: 1.0,
             fatal: String::new(),
-            font_source: String::new(),
-            map_view: mapview::MapUiState::default(),
         }
     }
 }
@@ -142,7 +143,6 @@ impl Default for UiState {
 impl UiState {
     pub fn toast(&mut self, text: impl Into<String>, bad: bool) {
         let text = text.into();
-        // 连续同类失败合并，避免刷屏。
         if let Some(last) = self.toasts.last_mut()
             && last.bad == bad
             && last.text == text
@@ -153,7 +153,7 @@ impl UiState {
         self.toasts.push(Toast {
             text,
             bad,
-            until: time::now_ms() + if bad { 0 } else { 3000 },
+            until: time::now_ms() + if bad { 8000 } else { 3000 },
             sticky: bad,
         });
         if self.toasts.len() > 3 {
@@ -165,47 +165,30 @@ impl UiState {
         let now = time::now_ms();
         self.toasts.retain(|t| t.sticky || t.until > now);
     }
+
+    pub fn active_toast(&self) -> Option<&Toast> {
+        self.toasts.last()
+    }
 }
 
-pub fn root(ctx: &egui::Context, st: &mut UiState, app: &AppState, out: &mut Vec<Intent>) {
-    st.prune_toasts();
-    match st.view {
-        View::Login => views::login::show(ctx, st, out),
-        View::Create => views::create::show(ctx, st, out),
-        View::Fatal => views::fatal::show(ctx, st, out),
-        View::Main => views::game::show(ctx, st, app, out),
-    }
-    draw_toasts(ctx, st);
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-fn draw_toasts(ctx: &egui::Context, st: &mut UiState) {
-    if st.toasts.is_empty() {
-        return;
+    #[test]
+    fn fn_keys_map_to_pages() {
+        assert_eq!(Page::from_fn_key(1), Some(Page::Character));
+        assert_eq!(Page::from_fn_key(8), Some(Page::Settings));
+        assert_eq!(Page::from_fn_key(9), None);
     }
-    let mut dismiss: Option<usize> = None;
-    egui::Area::new(egui::Id::new("toasts"))
-        .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0_f32, -60.0_f32))
-        .order(egui::Order::Foreground)
-        .show(ctx, |ui| {
-            ui.set_max_width(420.0);
-            for (i, t) in st.toasts.iter().enumerate() {
-                let color = if t.bad { theme::BAD } else { theme::ACCENT };
-                egui::Frame::new()
-                    .fill(theme::PANEL)
-                    .stroke(egui::Stroke::new(1.0_f32, color))
-                    .inner_margin(egui::Margin::symmetric(10, 6))
-                    .corner_radius(6)
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new(&t.text).color(color));
-                            if t.sticky && ui.small_button("×").clicked() {
-                                dismiss = Some(i);
-                            }
-                        });
-                    });
-            }
-        });
-    if let Some(i) = dismiss {
-        st.toasts.remove(i);
+
+    #[test]
+    fn toast_dedups_consecutive_same_text() {
+        let mut st = UiState::default();
+        st.toast("连接断开", true);
+        st.toast("连接断开", true);
+        assert_eq!(st.toasts.len(), 1);
+        st.toast("别的事", false);
+        assert_eq!(st.toasts.len(), 2);
     }
 }

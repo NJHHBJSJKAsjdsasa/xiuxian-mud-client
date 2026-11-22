@@ -31,7 +31,7 @@ enum SessionEnd {
     Closed { code: u16, reason: String },
 }
 
-pub async fn run(ctx: egui::Context, mut cmds: UnboundedReceiver<NetCmd>, ev: Sender<NetEvent>) {
+pub async fn run(mut cmds: UnboundedReceiver<NetCmd>, ev: Sender<NetEvent>) {
     loop {
         // 等登录命令
         let (server, name, pass, register) = loop {
@@ -46,7 +46,7 @@ pub async fn run(ctx: egui::Context, mut cmds: UnboundedReceiver<NetCmd>, ev: Se
                 Some(_) => continue,
             }
         };
-        emit(&ev, &ctx, NetEvent::Status(ConnStatus::LoggingIn));
+        emit(&ev, NetEvent::Status(ConnStatus::LoggingIn));
 
         let auth = if register {
             http::register(&server, &name, &pass).await
@@ -58,7 +58,6 @@ pub async fn run(ctx: egui::Context, mut cmds: UnboundedReceiver<NetCmd>, ev: Se
             Ok(_) => {
                 emit(
                     &ev,
-                    &ctx,
                     NetEvent::Err {
                         n: None,
                         code: "E-AUTH".into(),
@@ -66,13 +65,12 @@ pub async fn run(ctx: egui::Context, mut cmds: UnboundedReceiver<NetCmd>, ev: Se
                         extra: Value::Null,
                     },
                 );
-                emit(&ev, &ctx, NetEvent::Status(ConnStatus::Idle));
+                emit(&ev, NetEvent::Status(ConnStatus::Idle));
                 continue;
             }
             Err(e) => {
                 emit(
                     &ev,
-                    &ctx,
                     NetEvent::Err {
                         n: None,
                         code: "E-AUTH".into(),
@@ -80,7 +78,7 @@ pub async fn run(ctx: egui::Context, mut cmds: UnboundedReceiver<NetCmd>, ev: Se
                         extra: Value::Null,
                     },
                 );
-                emit(&ev, &ctx, NetEvent::Status(ConnStatus::Idle));
+                emit(&ev, NetEvent::Status(ConnStatus::Idle));
                 continue;
             }
         };
@@ -92,20 +90,19 @@ pub async fn run(ctx: egui::Context, mut cmds: UnboundedReceiver<NetCmd>, ev: Se
         let mut attempt = 0u32;
 
         loop {
-            emit(&ev, &ctx, NetEvent::Status(ConnStatus::Connecting));
-            match session(&ctx, &ev, &mut cmds, &creds).await {
+            emit(&ev, NetEvent::Status(ConnStatus::Connecting));
+            match session(&ev, &mut cmds, &creds).await {
                 SessionEnd::Shutdown => return,
                 SessionEnd::Logout => {
                     let _ = http::logout(&creds.server, &creds.token).await;
                     emit(
                         &ev,
-                        &ctx,
                         NetEvent::Status(ConnStatus::Offline("已退出登录".into())),
                     );
                     break;
                 }
                 SessionEnd::Fatal(msg) => {
-                    emit(&ev, &ctx, NetEvent::Status(ConnStatus::Fatal(msg)));
+                    emit(&ev, NetEvent::Status(ConnStatus::Fatal(msg)));
                     return;
                 }
                 SessionEnd::Closed { code, reason } => {
@@ -116,16 +113,12 @@ pub async fn run(ctx: egui::Context, mut cmds: UnboundedReceiver<NetCmd>, ev: Se
                         } else {
                             format!("{}（{code} {reason}）", kind.user_message())
                         };
-                        emit(&ev, &ctx, NetEvent::Status(ConnStatus::Offline(msg)));
+                        emit(&ev, NetEvent::Status(ConnStatus::Offline(msg)));
                         break;
                     }
                     attempt += 1;
                     let secs = kind.backoff_secs(attempt);
-                    emit(
-                        &ev,
-                        &ctx,
-                        NetEvent::Status(ConnStatus::Backoff { secs, attempt }),
-                    );
+                    emit(&ev, NetEvent::Status(ConnStatus::Backoff { secs, attempt }));
                     if !wait_backoff(&mut cmds, secs).await {
                         return;
                     }
@@ -158,7 +151,6 @@ async fn wait_backoff(cmds: &mut UnboundedReceiver<NetCmd>, secs: u64) -> bool {
 }
 
 async fn session(
-    ctx: &egui::Context,
     ev: &Sender<NetEvent>,
     cmds: &mut UnboundedReceiver<NetCmd>,
     creds: &Creds,
@@ -211,7 +203,7 @@ async fn session(
                 match incoming {
                     Some(Ok(Message::Text(txt))) => {
                         last_rx = Instant::now();
-                        if let Some(end) = handle_text(ctx, ev, txt.as_str(), &mut ready_seen) {
+                        if let Some(end) = handle_text(ev, txt.as_str(), &mut ready_seen) {
                             return end;
                         }
                     }
@@ -278,12 +270,7 @@ async fn session(
     }
 }
 
-fn handle_text(
-    ctx: &egui::Context,
-    ev: &Sender<NetEvent>,
-    txt: &str,
-    ready_seen: &mut bool,
-) -> Option<SessionEnd> {
+fn handle_text(ev: &Sender<NetEvent>, txt: &str, ready_seen: &mut bool) -> Option<SessionEnd> {
     let frame: InFrame = match serde_json::from_str(txt) {
         Ok(f) => f,
         Err(e) => {
@@ -297,9 +284,9 @@ fn handle_text(
             match serde_json::from_value::<ReadyView>(frame.d) {
                 Ok(r) => {
                     *ready_seen = true;
-                    emit(ev, ctx, NetEvent::Ready(Box::new(r)));
+                    emit(ev, NetEvent::Ready(Box::new(r)));
                     // ready 才是"握手 + 鉴权都过了"的标志；之前一律算连接中。
-                    emit(ev, ctx, NetEvent::Status(ConnStatus::Online));
+                    emit(ev, NetEvent::Status(ConnStatus::Online));
                 }
                 Err(e) => {
                     return Some(SessionEnd::Fatal(format!("ready 帧字段不兼容：{e}")));
@@ -307,11 +294,11 @@ fn handle_text(
             }
         }
         "state" => match serde_json::from_value::<PlayerView>(frame.d) {
-            Ok(v) => emit(ev, ctx, NetEvent::State(Box::new(v))),
+            Ok(v) => emit(ev, NetEvent::State(Box::new(v))),
             Err(e) => tracing::warn!("state 解析失败：{e}"),
         },
         "vital" => match serde_json::from_value::<VitalView>(frame.d) {
-            Ok(v) => emit(ev, ctx, NetEvent::Vital(Box::new(v))),
+            Ok(v) => emit(ev, NetEvent::Vital(Box::new(v))),
             Err(e) => tracing::warn!("vital 解析失败：{e}"),
         },
         "log" => {
@@ -321,26 +308,26 @@ fn handle_text(
                 .and_then(|l| serde_json::from_value(l.clone()).ok())
                 .unwrap_or_default();
             if !lines.is_empty() {
-                emit(ev, ctx, NetEvent::Log(lines));
+                emit(ev, NetEvent::Log(lines));
             }
         }
         "map" => match serde_json::from_value::<MapView>(frame.d) {
-            Ok(v) => emit(ev, ctx, NetEvent::Map(Box::new(v))),
+            Ok(v) => emit(ev, NetEvent::Map(Box::new(v))),
             Err(e) => tracing::warn!("map 解析失败：{e}"),
         },
         "chat" => match serde_json::from_value::<ChatMsg>(frame.d) {
-            Ok(v) => emit(ev, ctx, NetEvent::Chat(Box::new(v))),
+            Ok(v) => emit(ev, NetEvent::Chat(Box::new(v))),
             Err(e) => tracing::warn!("chat 解析失败：{e}"),
         },
         "presence" => {
             let count = frame.d.get("count").and_then(|c| c.as_i64()).unwrap_or(0);
-            emit(ev, ctx, NetEvent::Presence(count));
+            emit(ev, NetEvent::Presence(count));
         }
         "battle" => match serde_json::from_value::<BattleView>(frame.d) {
-            Ok(v) => emit(ev, ctx, NetEvent::Battle(Box::new(v))),
+            Ok(v) => emit(ev, NetEvent::Battle(Box::new(v))),
             Err(e) => tracing::warn!("battle 解析失败：{e}"),
         },
-        "ack" => emit(ev, ctx, NetEvent::Ack { n: frame.n }),
+        "ack" => emit(ev, NetEvent::Ack { n: frame.n }),
         "err" => {
             let code = frame
                 .d
@@ -364,7 +351,6 @@ fn handle_text(
             }
             emit(
                 ev,
-                ctx,
                 NetEvent::Err {
                     n: frame.n,
                     code,
@@ -381,7 +367,7 @@ fn handle_text(
                 .unwrap_or_default()
                 .to_string();
             if !text.is_empty() {
-                emit(ev, ctx, NetEvent::Announce(text));
+                emit(ev, NetEvent::Announce(text));
             }
         }
         "evict" => {
@@ -391,7 +377,7 @@ fn handle_text(
                 .and_then(|r| r.as_str())
                 .unwrap_or("账号在别处登录")
                 .to_string();
-            emit(ev, ctx, NetEvent::Status(ConnStatus::Offline(reason)));
+            emit(ev, NetEvent::Status(ConnStatus::Offline(reason)));
         }
         other => {
             tracing::debug!("忽略未知消息类型：{other}");

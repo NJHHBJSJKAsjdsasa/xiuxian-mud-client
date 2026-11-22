@@ -22,8 +22,10 @@ pub struct MapNode {
 
 #[derive(Debug, Clone, Default)]
 pub struct MapEdge {
+    #[allow(dead_code)]
     pub cost_sec: i64,
     pub ok: bool,
+    #[allow(dead_code)]
     pub blocked: bool,
 }
 
@@ -32,7 +34,7 @@ pub struct MapGraph {
     pub nodes: BTreeMap<String, MapNode>,
     /// 无向边：`(较小的 id, 较大的 id)`。
     pub edges: BTreeMap<(String, String), MapEdge>,
-    /// 布局缓存（世界坐标）；store 层不引 egui 类型。
+    /// 布局缓存（世界坐标）；store 层不引任何 UI 类型。
     pos: BTreeMap<String, (f32, f32)>,
 }
 
@@ -206,30 +208,6 @@ impl MapGraph {
         self.pos.clear();
     }
 
-    /// 从 `from` 出发的 BFS 步数；用来决定"画到第几圈"。
-    pub fn distances_from(&self, from: &str) -> BTreeMap<String, usize> {
-        let mut d: BTreeMap<String, usize> = BTreeMap::new();
-        if !self.nodes.contains_key(from) {
-            return d;
-        }
-        d.insert(from.to_string(), 0);
-        let mut q = std::collections::VecDeque::new();
-        q.push_back(from.to_string());
-        while let Some(id) = q.pop_front() {
-            let cur = d[&id];
-            if cur >= 6 {
-                continue;
-            }
-            for (n, _) in self.neighbors_of(&id) {
-                if !d.contains_key(&n) {
-                    d.insert(n.clone(), cur + 1);
-                    q.push_back(n);
-                }
-            }
-        }
-        d
-    }
-
     /// 与某节点相邻的节点（含不可通行的，由调用方判断 `ok`）。
     pub fn neighbors_of(&self, id: &str) -> Vec<(String, MapEdge)> {
         let mut out = Vec::new();
@@ -244,7 +222,7 @@ impl MapGraph {
     }
 
     /// 返回布局：服务端给了坐标就按真实排布，没给就退回力导向缓存。
-    pub fn layout(&self, current: &str) -> HashMap<String, egui::Pos2> {
+    pub fn layout(&self, current: &str) -> HashMap<String, (f32, f32)> {
         if self.nodes.get(current).map(|n| n.has_geo).unwrap_or(false) {
             return self.layout_geo(current);
         }
@@ -253,22 +231,22 @@ impl MapGraph {
             .keys()
             .map(|id| {
                 let (x, y) = self.pos.get(id).copied().unwrap_or((0.0, 0.0));
-                (id.clone(), egui::pos2(x - cx, y - cy))
+                (id.clone(), (x - cx, y - cy))
             })
             .collect()
     }
 
     /// 按内容表坐标摊开：一格约 6px，y 轴取反（服务端 y 向北为正）。
-    fn layout_geo(&self, current: &str) -> HashMap<String, egui::Pos2> {
+    fn layout_geo(&self, current: &str) -> HashMap<String, (f32, f32)> {
         const SCALE: f32 = 11.0;
         let cur = self.nodes.get(current);
         let (cx, cy) = cur.map(|n| (n.gx, n.gy)).unwrap_or((0, 0));
-        let mut out: HashMap<String, egui::Pos2> = HashMap::new();
+        let mut out: HashMap<String, (f32, f32)> = HashMap::new();
         for (id, n) in &self.nodes {
             if n.has_geo {
                 out.insert(
                     id.clone(),
-                    egui::pos2((n.gx - cx) as f32 * SCALE, -(n.gy - cy) as f32 * SCALE),
+                    ((n.gx - cx) as f32 * SCALE, -(n.gy - cy) as f32 * SCALE),
                 );
             }
         }
@@ -281,17 +259,20 @@ impl MapGraph {
             let mut sy = 0.0;
             let mut cnt = 0.0;
             for (nb, _) in self.neighbors_of(id) {
-                if let Some(p) = out.get(&nb) {
-                    sx += p.x;
-                    sy += p.y;
+                if let Some((px, py)) = out.get(&nb) {
+                    sx += px;
+                    sy += py;
                     cnt += 1.0;
                 }
             }
             let jitter = hash01(id) * std::f32::consts::TAU;
             let p = if cnt > 0.0 {
-                egui::pos2(sx / cnt, sy / cnt) + egui::vec2(jitter.cos(), jitter.sin()) * 26.0
+                (
+                    sx / cnt + jitter.cos() * 26.0,
+                    sy / cnt + jitter.sin() * 26.0,
+                )
             } else {
-                egui::pos2(jitter.cos(), jitter.sin()) * 40.0
+                (jitter.cos() * 40.0, jitter.sin() * 40.0)
             };
             out.insert(id.clone(), p);
         }
@@ -314,28 +295,6 @@ fn hash01(s: &str) -> f32 {
         h = h.wrapping_mul(16_777_619);
     }
     (h % 10_000) as f32 / 10_000.0
-}
-
-/// 地形 → 单字标记，画在节点旁边。
-pub fn terrain_glyph(t: &str) -> &'static str {
-    match t {
-        "woods" | "forest" => "林",
-        "bamboo" => "竹",
-        "river" | "lake" | "spring" => "泉",
-        "cliff" | "peak" | "slope" | "valley" => "山",
-        "town" => "镇",
-        "gate" => "关",
-        "cave" => "洞",
-        "marsh" => "泽",
-        "scree" => "石",
-        "plank" => "栈",
-        "lava" => "岩",
-        "desert" => "沙",
-        "snow" | "frost" => "雪",
-        "ruin" => "墟",
-        "shrine" => "祠",
-        _ => "路",
-    }
 }
 
 #[cfg(test)]
@@ -391,9 +350,11 @@ mod tests {
         });
         let pos = g.layout("a");
         assert_eq!(pos.len(), 3);
-        assert!(pos["a"].to_vec2().length() < 1.0);
-        assert!((pos["b"] - pos["c"]).length() > 20.0);
+        assert!(pos["a"].0.abs() < 1.0 && pos["a"].1.abs() < 1.0);
+        assert!(
+            ((pos["b"].0 - pos["c"].0).powi(2) + (pos["b"].1 - pos["c"].1).powi(2)).sqrt() > 20.0
+        );
         // 邻居不该被弹到很远。
-        assert!(pos["b"].to_vec2().length() < 400.0);
+        assert!((pos["b"].0.hypot(pos["b"].1)) < 400.0);
     }
 }

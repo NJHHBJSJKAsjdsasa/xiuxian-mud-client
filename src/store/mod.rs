@@ -1,5 +1,5 @@
 //! 客户端状态：唯一可变源，由服务端帧驱动。
-//! 这里不出现任何 `egui` 类型。
+//! 这里不出现任何 UI 类型。
 
 pub mod logbuf;
 pub mod mapgraph;
@@ -99,6 +99,12 @@ impl AppState {
     }
 
     pub fn apply_map(&mut self, m: &MapView) {
+        tracing::debug!(
+            "map 帧 loc={} name={:?} exits={}",
+            m.loc,
+            m.name,
+            m.exits.len()
+        );
         self.map_graph.observe(m);
         // `look` 的应答是单节点视图（exits 为空），不能拿它覆盖当前节点的出口，
         // 否则看一眼四周就把路全看没了。

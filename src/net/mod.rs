@@ -75,8 +75,7 @@ pub enum NetEvent {
     TokenExpired,
 }
 
-pub fn emit(tx: &crossbeam_channel::Sender<NetEvent>, ctx: &egui::Context, ev: NetEvent) {
-    if tx.send(ev).is_ok() {
-        ctx.request_repaint();
-    }
+pub fn emit(tx: &crossbeam_channel::Sender<NetEvent>, ev: NetEvent) {
+    // 满了就丢：TUI 每 30ms 拉一次，丢一条也不会卡住网络线程。
+    let _ = tx.try_send(ev);
 }

@@ -1,6 +1,7 @@
 //! 错误码与关闭码。
 
 pub const E_AUTH: &str = "E-AUTH";
+pub const E_NOCHAR: &str = "E-NOCHAR";
 pub const E_BADREQ: &str = "E-BADREQ";
 pub const E_BUSY: &str = "E-BUSY";
 pub const E_COOLDOWN: &str = "E-COOLDOWN";
@@ -12,6 +13,7 @@ pub const E_NOMP: &str = "E-NOMP";
 pub const E_NOITEM: &str = "E-NOITEM";
 pub const E_NOSTONE: &str = "E-NOSTONE";
 pub const E_FULL: &str = "E-FULL";
+pub const E_INTERNAL: &str = "E-INTERNAL";
 
 /// WebSocket 关闭码及其处置。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
