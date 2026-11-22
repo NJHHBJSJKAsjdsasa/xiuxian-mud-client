@@ -2,7 +2,7 @@
 
 ```
 doc_id: C-09
-version: 3.0.0
+version: 3.1.0
 updated: 2026-11-22
 owns: M1–M5 里程碑、每档的完成定义与依赖的协议面
 depends_on: C-01、C-02、C-05、C-08
@@ -16,6 +16,16 @@ depends_on: C-01、C-02、C-05、C-08
 - 每档都给一个能双击运行的 release 包；不给"只有开发机能跑"的中间态。
 
 ## 2. M1 · 窗口骨架与主循环
+
+**状态：已完成（2026-11-22）**。落地内容与实测：
+
+| 项 | 结果 |
+|---|---|
+| 工程 | `src/` 10 个模块（protocol / net / store / ui / util / config / app / main）已落盘 |
+| 可运行 | `cargo run -- --server ws://127.0.0.1:8080`；`--login 道号:密码 [--create 道号]` 为联调参数 |
+| 主循环 | 登录 → 建号 → 主界面 → 出口移动（含 10s 赶路倒计时）→ 到达刷新节点，实测通过 |
+| 质量门 | `cargo clippy --all-targets -- -D warnings` 干净；`cargo test` 6 项全绿；`doc-check` 11 份一致 |
+| 已知边界 | 历练/突破按服务端境界限制会被拒（凡人不能在中州历练），客户端如实显示 `E-NOREALM` |
 
 **工程**：`Cargo.toml`（eframe/tokio/serde 骨架）、`protocol/` 全部帧类型、`net/ws.rs` 握手与重连、
 `store/` 基础结构、`app.rs` 的 drain→Intent→绘制循环、`ui/theme.rs` 与 `ui/fonts.rs`、

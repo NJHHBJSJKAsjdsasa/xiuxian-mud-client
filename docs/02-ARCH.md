@@ -2,7 +2,7 @@
 
 ```
 doc_id: C-02
-version: 3.0.0
+version: 3.1.0
 updated: 2026-11-22
 owns: 技术选型、crate 清单、分层、目录结构、线程模型、资源与字体、模块依赖规则
 depends_on: C-01、C-03、C-04、C-05
@@ -37,10 +37,10 @@ depends_on: C-01、C-03、C-04、C-05
 
 | crate | 用途 | 备注 |
 |---|---|---|
-| `eframe` 0.37（`wgpu` 后端） | 窗口、事件循环、渲染 | 需要 Rust ≥ 1.95、edition 2024 |
+| `eframe` 0.32（`glow` 后端） | 窗口、事件循环、渲染 | Rust ≥ 1.85；0.37 的 UI-first 大改不追 |
 | `egui` | 控件与布局 | 与 eframe 同 minor，锁版本 |
-| `egui_extras` | 表格（`TableBuilder`）、日期/图片加载 | 与 egui 同版本 |
-| `egui_plot` | 交易行价格曲线 | 与 egui 同版本 |
+| `egui_extras` | 表格（`TableBuilder`） | M3 引入，与 egui 同版本 |
+| `egui_plot` | 交易行价格曲线 | M3 引入，与 egui 同版本 |
 | `tokio`（rt-multi-thread, macros, time, sync） | 运行时、定时器、通道 | 不引入 `full`，按需开 feature |
 | `tokio-tungstenite` + `rustls` | WebSocket 客户端 | 不依赖系统 OpenSSL |
 | `serde` / `serde_json` | 帧与载荷 | 未知字段默认忽略 |
@@ -51,7 +51,7 @@ depends_on: C-01、C-03、C-04、C-05
 | `dirs` | 配置与日志目录 | `config.toml`、token |
 | `toml` | 配置读写 | 只读写一个文件 |
 | `time` | 时间格式化 | 不用 `chrono`，只要 `HH:MM:SS` |
-| `egui_kittest`（dev） | UI 快照与交互测试 | 官方 UI 测试工具，随 egui 版本 |
+| `egui_kittest`（dev，M2 起） | UI 快照与交互测试 | 官方 UI 测试工具，随 egui 版本 |
 
 不引入：`arboard`（egui 自带复制/粘贴）、`chrono`、任何 WebView / JS 运行时、任何图标字体。
 
@@ -63,10 +63,11 @@ client/
 ├── Cargo.lock             入库（二进制项目）
 ├── docs/                  设计文档（本目录）
 ├── assets/
-│   └── fonts/             内置中文字体子集（SIL OFL，随包附 LICENSE）
+│   └── fonts/             可选：内置中文字体子集（SIL OFL；没有就走系统字体）
 ├── tools/doc-check.py     文档自查
 └── src/
     ├── main.rs            启动、配置、日志、字体、eframe::run_native
+    ├── config.rs          config.toml 读写、日志目录
     ├── app.rs             eframe::App 实现：drain → Intent → NetCmd → 绘制
     ├── protocol/
     │   ├── frame.rs       In / Out 帧、t / a / n / d
@@ -138,14 +139,16 @@ egui 每帧重跑整棵 UI 代码，所以"状态"必须留在 `AppState` 与少
 
 ## 6. 渲染后端与兜底
 
-- 默认 `wgpu`（Windows→DX12/Vulkan，macOS→Metal，Linux→Vulkan/GL）。
-- 老机器或远程桌面：`--renderer glow` 走 OpenGL 3.3；仍失败则启动时弹原生错误框，提示更新显卡驱动。
+- 默认 **glow**（OpenGL 3.3）：三平台驱动覆盖最广，远程桌面也能跑。
+- 想要 wgpu（DX12/Vulkan/Metal）：在 `Cargo.toml` 打开 eframe 的 `wgpu` feature，`--renderer wgpu` 才生效。
+- 初始化失败：启动时弹原生错误框并写 `logs/panic.log`，提示更新显卡驱动。
 - 不静默降级到软件渲染：软件渲染下 60fps 撑不住，体验比报错更糟。
 
 ## 7. 资源与字体
 
-- **中文必须内置**：egui 0.37 起 `default_fonts` 不再是默认 feature，且系统字体在不同平台差异大。
-  仓库内放 `assets/fonts/NotoSansSC-Regular.subset.otf` 与 `Medium.subset.otf`，用 `include_bytes!` 编进二进制。
+- **中文必须显式装载**：egui 默认字体不含 CJK。`ui/fonts.rs` 先找 `assets/fonts/NotoSansSC-Regular.subset.otf`，
+  找不到就读系统字体（Windows `msyh.ttc`、macOS `PingFang.ttc`、Linux `NotoSansCJK`）。
+  发布版建议把子集字体编进二进制，避免三平台字形差异（裁剪命令见 `assets/fonts/README.md`）。
 - 子集范围：GB2312 一级+二级汉字（6763）、ASCII、常用中文标点、`·—…「」《》`、`⏵ ✕ ✓` 等界面符号；预估 2–3MB/字重。
   裁剪命令记在 `assets/fonts/README.md`（`pyftsubset --text-file=charset.txt`）。
 - 回退链：`SC Regular` → egui 默认字体（拉丁与符号）→ 系统字体。缺字时不许出现"豆腐块"：`ui::fonts` 启动自检，

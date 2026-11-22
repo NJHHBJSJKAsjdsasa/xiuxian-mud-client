@@ -2,7 +2,7 @@
 
 ```
 doc_id: C-10
-version: 3.0.0
+version: 3.1.0
 updated: 2026-11-22
 owns: 客户端仓的克隆、密钥、日常循环、与服务端的协议同步、构建发布与排错
 depends_on: C-00、C-02、C-03、服务端 docs/05、服务端 docs/13
@@ -40,6 +40,15 @@ cargo run -- --server ws://127.0.0.1:8080
 
 联调需要服务端在跑（另一个仓库）：`go run ./cmd/server`，默认 `127.0.0.1:8080`。
 客户端用配置项 `server` 指定地址；不带则读 `config.toml` 或默认本机。
+
+联调加速参数（不对外宣传）：
+
+```bash
+cargo run -- --server ws://127.0.0.1:8080 --login 沈砚:test123456 --create 沈砚
+```
+
+- `--login 道号:密码`：跳过登录页（省掉每次手输）。
+- `--create 道号`：登录后若还没有角色，自动建号。
 
 Linux 首次编译要先装图形依赖（eframe 官方要求）：
 

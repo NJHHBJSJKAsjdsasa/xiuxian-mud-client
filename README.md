@@ -11,7 +11,11 @@
 
 ## 现状
 
-- **只有设计文档**（`docs/`），代码尚未开始（`src/` 在 M1 落盘）。
+**M1 已落地**（2026-11-22）：登录 / 建号 / 主界面三栏 / 日志 / 出口移动（含赶路倒计时）/ 打坐 / 突破 / 探索的请求链路可用。
+
+
+- `src/` 已落盘：protocol / net / store / ui / util / config / app。
+- `cargo clippy --all-targets -- -D warnings` 干净，`cargo test` 全绿。
 - 协议以服务端 `docs/05-PROTOCOL.md` 为准，接入流程看 `docs/12-API.md`。
 
 ## 先读哪几份
@@ -28,7 +32,7 @@
 ## 计划中的技术栈
 
 - Rust（edition 2024）+ tokio
-- 界面：`eframe` / `egui` 0.37（wgpu 后端，可切 glow）；`egui_extras` 表格、`egui_plot` 曲线
+- 界面：`eframe` / `egui` **0.32**（glow 后端，OpenGL 3.3）；`egui_extras` 表格与 `egui_plot` 曲线在 M3 引入
 - 传输：`tokio-tungstenite` + `rustls`
 - 序列化：`serde` / `serde_json`
 - 测试：`cargo test` + `egui_kittest` 快照 + 帧回放（JSONL）+ 服务端脚本对照
@@ -45,8 +49,14 @@ go run ./cmd/server
 cargo run -- --server ws://127.0.0.1:8080
 ```
 
-老机器或远程桌面渲染失败时：`cargo run -- --renderer glow`。
+联调时可以跳过手输（`--create` 只在还没有角色时生效）：
+
+```bash
+cargo run -- --server ws://127.0.0.1:8080 --login 沈砚:test123456 --create 沈砚
+```
+
 服务器地址也可以写在 `config.toml` 的 `server` 项；命令行优先。
+默认 glow 后端（OpenGL 3.3）；要 wgpu 需在 `Cargo.toml` 打开 eframe 的 `wgpu` feature。
 
 ## 自查
 
@@ -62,5 +72,5 @@ cargo test
 - 不复制服务端数值（伤害、体力、次数、回合上限）；一律从帧里读或引用服务端文档。
 - 不本地推导战斗结果；只播服务端给的帧。
 - 协议版本 `PROTO` 与 `hello.proto` 必须一致；收到关闭码 `4004` 提示升级，不重连。
-- 中文用内置字体子集，缺字不许出现"豆腐块"；新字先进 `assets/fonts/charset.txt` 再重新裁剪。
+- 中文优先用 `assets/fonts/` 的内置子集，没有则回退系统字体（msyh / PingFang / NotoSansCJK）；缺字不许出现"豆腐块"。
 - 界面只在有状态变化/动画/倒计时时重绘；不要无条件 `request_repaint()`。
