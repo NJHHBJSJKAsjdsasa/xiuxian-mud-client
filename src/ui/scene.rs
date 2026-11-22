@@ -18,9 +18,17 @@ pub struct Scene<'a> {
     pub explored: i32,
 }
 
-pub fn show(ui: &mut Ui, s: Scene<'_>, height: f32) -> egui::Response {
-    let (rect, resp) =
-        ui.allocate_exact_size(vec2(ui.available_width(), height), egui::Sense::hover());
+/// 姿态：决定场景里那个人影的姿势。
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub enum Pose {
+    #[default]
+    Standing,
+    Sitting,
+    Walking,
+}
+
+/// 在给定矩形里画一整幅场景（不占布局，由调用方叠加 UI）。
+pub fn paint(ui: &Ui, rect: Rect, s: &Scene<'_>, pose: Pose) {
     let p = ui.painter_at(rect);
     let (sky_top, sky_bot) = sky_colors(s.daypart, s.weather);
 
@@ -34,7 +42,7 @@ pub fn show(ui: &mut Ui, s: Scene<'_>, height: f32) -> egui::Response {
         let y1 = rect.top() + rect.height() * t1 + 1.0;
         p.rect_filled(
             Rect::from_min_max(pos2(rect.left(), y0), pos2(rect.right(), y1)),
-            0.0,
+            0,
             c,
         );
     }
@@ -42,7 +50,7 @@ pub fn show(ui: &mut Ui, s: Scene<'_>, height: f32) -> egui::Response {
     draw_celestial(&p, rect, s.daypart, s.weather);
 
     // 远山三层：越远越淡，轮廓低。
-    let base = rect.top() + rect.height() * 0.78;
+    let base = rect.top() + rect.height() * 0.74;
     draw_ridge(
         &p,
         rect,
@@ -69,11 +77,11 @@ pub fn show(ui: &mut Ui, s: Scene<'_>, height: f32) -> egui::Response {
     );
 
     draw_terrain(&p, rect, s.terrain);
+    draw_path(&p, rect);
+    draw_figure(&p, rect, pose);
     draw_weather(&p, rect, s.weather);
     draw_frame(&p, rect);
-    draw_caption(&p, rect, &s);
-
-    resp
+    draw_caption(&p, rect, s);
 }
 
 fn sky_colors(daypart: &str, weather: &str) -> (Color32, Color32) {
@@ -382,6 +390,178 @@ fn draw_terrain(p: &egui::Painter, rect: Rect, terrain: &str) {
     }
 }
 
+/// 人影：墨色剪影，坐/站/行走三态。比例按"身高 = 100 单位"定，
+/// 头小、肩宽、下摆开，才不会画成一根石碑。
+fn draw_figure(p: &egui::Painter, rect: Rect, pose: Pose) {
+    let k = (rect.height() / 220.0).clamp(1.1, 3.0);
+    let cx = rect.center().x;
+    let ground = rect.top() + rect.height() * 0.86;
+    let ink = Color32::from_rgba_unmultiplied(0x05, 0x08, 0x0B, 238);
+    let rim = Color32::from_rgba_unmultiplied(0x7F, 0xD1, 0xC1, 40);
+
+    // 地面投影
+    p.add(Shape::ellipse_filled(
+        pos2(cx, ground + 3.0 * k),
+        vec2(30.0 * k, 6.0 * k),
+        Color32::from_rgba_unmultiplied(0x00, 0x00, 0x00, 80),
+    ));
+
+    match pose {
+        Pose::Sitting => {
+            // 盘坐：腿是一横椭圆，身子矮一截。
+            p.add(Shape::ellipse_filled(
+                pos2(cx, ground - 5.0 * k),
+                vec2(26.0 * k, 8.0 * k),
+                ink,
+            ));
+            p.add(Shape::convex_polygon(
+                vec![
+                    pos2(cx - 11.0 * k, ground - 8.0 * k),
+                    pos2(cx + 11.0 * k, ground - 8.0 * k),
+                    pos2(cx + 10.0 * k, ground - 52.0 * k),
+                    pos2(cx - 10.0 * k, ground - 52.0 * k),
+                ],
+                ink,
+                Stroke::NONE,
+            ));
+            // 头 + 颈
+            p.circle_filled(pos2(cx, ground - 64.0 * k), 7.5 * k, ink);
+            p.line_segment(
+                [pos2(cx, ground - 56.0 * k), pos2(cx, ground - 52.0 * k)],
+                Stroke::new(3.0_f32 * k, ink),
+            );
+            // 肩线微光
+            p.line_segment(
+                [
+                    pos2(cx - 10.0 * k, ground - 50.0 * k),
+                    pos2(cx + 10.0 * k, ground - 50.0 * k),
+                ],
+                Stroke::new(1.2_f32, rim),
+            );
+        }
+        Pose::Walking => {
+            let lean = 4.0 * k;
+            p.add(Shape::convex_polygon(
+                vec![
+                    pos2(cx - 12.0 * k + lean, ground - 76.0 * k),
+                    pos2(cx + 12.0 * k + lean, ground - 76.0 * k),
+                    pos2(cx + 19.0 * k, ground - 2.0 * k),
+                    pos2(cx + 3.0 * k, ground - 2.0 * k),
+                ],
+                ink,
+                Stroke::NONE,
+            ));
+            // 迈出的腿
+            p.line_segment(
+                [
+                    pos2(cx + 8.0 * k, ground - 10.0 * k),
+                    pos2(cx + 16.0 * k, ground),
+                ],
+                Stroke::new(6.0_f32 * k, ink),
+            );
+            p.circle_filled(pos2(cx + lean, ground - 86.0 * k), 7.5 * k, ink);
+            p.line_segment(
+                [
+                    pos2(cx + lean, ground - 78.0 * k),
+                    pos2(cx + lean, ground - 74.0 * k),
+                ],
+                Stroke::new(3.0_f32 * k, ink),
+            );
+            p.line_segment(
+                [
+                    pos2(cx - 11.0 * k + lean, ground - 74.0 * k),
+                    pos2(cx + 11.0 * k + lean, ground - 74.0 * k),
+                ],
+                Stroke::new(1.2_f32, rim),
+            );
+        }
+        Pose::Standing => {
+            // 肩宽 12、下摆宽 18：上窄下宽才是长袍，不是柱子。
+            p.add(Shape::convex_polygon(
+                vec![
+                    pos2(cx - 12.0 * k, ground - 76.0 * k),
+                    pos2(cx + 12.0 * k, ground - 76.0 * k),
+                    pos2(cx + 18.0 * k, ground),
+                    pos2(cx - 18.0 * k, ground),
+                ],
+                ink,
+                Stroke::NONE,
+            ));
+            // 双臂
+            p.line_segment(
+                [
+                    pos2(cx - 11.0 * k, ground - 72.0 * k),
+                    pos2(cx - 15.0 * k, ground - 34.0 * k),
+                ],
+                Stroke::new(4.5_f32 * k, ink),
+            );
+            p.line_segment(
+                [
+                    pos2(cx + 11.0 * k, ground - 72.0 * k),
+                    pos2(cx + 15.0 * k, ground - 34.0 * k),
+                ],
+                Stroke::new(4.5_f32 * k, ink),
+            );
+            // 头 + 颈
+            p.circle_filled(pos2(cx, ground - 88.0 * k), 7.5 * k, ink);
+            p.line_segment(
+                [pos2(cx, ground - 80.0 * k), pos2(cx, ground - 76.0 * k)],
+                Stroke::new(3.0_f32 * k, ink),
+            );
+            // 肩线 + 腰带
+            p.line_segment(
+                [
+                    pos2(cx - 12.0 * k, ground - 74.0 * k),
+                    pos2(cx + 12.0 * k, ground - 74.0 * k),
+                ],
+                Stroke::new(1.2_f32, rim),
+            );
+            p.line_segment(
+                [
+                    pos2(cx - 14.0 * k, ground - 40.0 * k),
+                    pos2(cx + 14.0 * k, ground - 40.0 * k),
+                ],
+                Stroke::new(
+                    1.0_f32,
+                    Color32::from_rgba_unmultiplied(0x7F, 0xD1, 0xC1, 22),
+                ),
+            );
+        }
+    }
+}
+
+/// 脚下的路：一条向画面下方放大的浅带，配合人影给出"纵深"和"可前进"的暗示。
+fn draw_path(p: &egui::Painter, rect: Rect) {
+    let cx = rect.center().x;
+    let ground = rect.top() + rect.height() * 0.86;
+    let h = rect.bottom() - ground;
+    if h < 10.0 {
+        return;
+    }
+    let w0 = rect.height() * 0.05;
+    let w1 = rect.height() * 0.22;
+    p.add(Shape::convex_polygon(
+        vec![
+            pos2(cx - w0, ground),
+            pos2(cx + w0, ground),
+            pos2(cx + w1, rect.bottom()),
+            pos2(cx - w1, rect.bottom()),
+        ],
+        Color32::from_rgba_unmultiplied(0x39, 0x36, 0x2C, 46),
+        Stroke::NONE,
+    ));
+    // 路面两条边线
+    for s in [-1.0f32, 1.0] {
+        p.line_segment(
+            [pos2(cx + s * w0, ground), pos2(cx + s * w1, rect.bottom())],
+            Stroke::new(
+                1.0_f32,
+                Color32::from_rgba_unmultiplied(0xC9, 0xB8, 0x96, 22),
+            ),
+        );
+    }
+}
+
 fn draw_weather(p: &egui::Painter, rect: Rect, weather: &str) {
     match weather {
         "rain" | "storm" => {
@@ -459,27 +639,26 @@ fn draw_frame(p: &egui::Painter, rect: Rect) {
 }
 
 fn draw_caption(p: &egui::Painter, rect: Rect, s: &Scene<'_>) {
-    // 底部渐变压暗：保证文字可读，又不把山脚压成一块黑板。
-    let shade_h = 130.0;
-    let bands = 26;
+    // 顶部渐变压暗：标题压在天空上也要读得清。
+    let bands = 18;
+    let h = 132.0;
     for i in 0..bands {
-        let t0 = i as f32 / bands as f32;
-        let t1 = (i + 1) as f32 / bands as f32;
-        let y0 = rect.bottom() - shade_h + shade_h * t0;
-        let y1 = rect.bottom() - shade_h + shade_h * t1 + 1.0;
-        let a = (185.0 * t0 * t0) as u8;
+        let t = i as f32 / bands as f32;
+        let a = (150.0 * (1.0 - t) * (1.0 - t)) as u8;
+        let y0 = rect.top() + h * t;
+        let y1 = rect.top() + h * (t + 1.0 / bands as f32) + 1.0;
         p.rect_filled(
             Rect::from_min_max(pos2(rect.left(), y0), pos2(rect.right(), y1)),
-            0.0,
+            0,
             Color32::from_rgba_unmultiplied(0x04, 0x06, 0x08, a),
         );
     }
 
     p.text(
-        pos2(rect.left() + 22.0, rect.bottom() - 84.0),
+        pos2(rect.left() + 26.0, rect.top() + 20.0),
         Align2::LEFT_TOP,
         s.name,
-        theme::serif_id(32.0),
+        theme::serif_id(30.0),
         theme::TEXT,
     );
 
@@ -493,31 +672,24 @@ fn draw_caption(p: &egui::Painter, rect: Rect, s: &Scene<'_>) {
         }
         meta.push_str(g);
     }
-    if !meta.is_empty() {
-        p.text(
-            pos2(rect.left() + 22.0, rect.bottom() - 38.0),
-            Align2::LEFT_TOP,
-            meta,
-            FontId::proportional(12.0),
-            theme::GOLD,
-        );
-    }
+    meta.push_str(&format!(" · 探索 {}/20", s.explored));
+    p.text(
+        pos2(rect.left() + 28.0, rect.top() + 58.0),
+        Align2::LEFT_TOP,
+        meta,
+        FontId::proportional(11.5),
+        theme::GOLD,
+    );
+
     if !s.desc.is_empty() {
         p.text(
-            pos2(rect.left() + 24.0, rect.bottom() - 42.0),
+            pos2(rect.left() + 28.0, rect.top() + 76.0),
             Align2::LEFT_TOP,
-            crate::util::text::truncate_chars(s.desc, 56),
+            crate::util::text::truncate_chars(s.desc, 48),
             FontId::proportional(13.0),
-            theme::mix(theme::TEXT, theme::BG, 0.3),
+            theme::mix(theme::TEXT, theme::BG, 0.28),
         );
     }
-    p.text(
-        pos2(rect.right() - 18.0, rect.bottom() - 22.0),
-        Align2::RIGHT_BOTTOM,
-        format!("探索 {}/20", s.explored),
-        FontId::proportional(10.5),
-        theme::FAINT,
-    );
 }
 
 /// 确定性伪随机：同一帧内不抖动，也不引入 rand。

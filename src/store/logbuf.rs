@@ -8,6 +8,7 @@ use crate::util::time;
 pub struct Entry {
     #[allow(dead_code)] // 供 M5 日志搜索按序号定位。
     pub seq: u64,
+    #[allow(dead_code)] // 对白框不显示时刻，留给 M5 的日志检索。
     pub ts: i64,
     pub line: LogLine,
 }

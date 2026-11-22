@@ -1,7 +1,6 @@
 //! 界面层：只读 `store`，只发 `Intent`。不碰 socket、不发动作帧。
 
 pub mod fonts;
-pub mod logview;
 pub mod mapview;
 pub mod scene;
 pub mod theme;
@@ -44,20 +43,6 @@ impl Page {
             Page::Map => "地图",
             Page::Settings => "设置",
         }
-    }
-
-    pub fn all() -> [Page; 9] {
-        [
-            Page::Game,
-            Page::Character,
-            Page::Bag,
-            Page::Skills,
-            Page::Social,
-            Page::Market,
-            Page::Sect,
-            Page::Map,
-            Page::Settings,
-        ]
     }
 }
 
@@ -120,9 +105,10 @@ pub struct UiState {
     pub chat_ch: String,
     pub chat_to: String,
     pub chat_text: String,
+    /// 对白框是否贴着最新一行。
+    pub chat_stick: bool,
     pub selected_exit: usize,
     pub toasts: Vec<Toast>,
-    pub log_stick: bool,
     pub show_timestamps: bool,
     pub ui_scale: f32,
     pub fatal: String,
@@ -141,9 +127,9 @@ impl Default for UiState {
             chat_ch: "world".into(),
             chat_to: String::new(),
             chat_text: String::new(),
+            chat_stick: true,
             selected_exit: 0,
             toasts: Vec::new(),
-            log_stick: true,
             show_timestamps: true,
             ui_scale: 1.0,
             fatal: String::new(),
