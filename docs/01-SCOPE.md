@@ -2,8 +2,8 @@
 
 ```
 doc_id: C-01
-version: 4.0.0
-updated: 2026-11-22
+version: 5.0.0
+updated: 2026-11-23
 owns: 客户端的目标、非目标、形态与成功标准
 depends_on: C-00、服务端 docs/01
 ```
@@ -13,15 +13,15 @@ depends_on: C-00、服务端 docs/01
 做一个**能长时间挂机、也能认真打架**的修仙终端客户端：日志读得下去，面板看得清，
 断了能自己接上，一个二进制拷到 SSH 里就能跑。
 
-## 2. 形态：Rust + 终端（TUI）
+## 2. 形态：Go + 终端（TUI）
 
 | 项 | 选择 | 理由 |
 |---|---|---|
-| 语言 | Rust（edition 2024） | 单二进制、无运行时；异步与 WS 生态成熟 |
-| 界面 | `ratatui` 0.29 + `crossterm` 0.28 | 字符网格天然是游戏语法（MUD/roguelike 传统）；纯字符输出，无渲染后端 |
-| 并发 | tokio（rt-multi-thread） | 一条读、一条写；主线程做按键与重绘 |
-| 传输 | tokio-tungstenite + rustls | 直连服务端 `/ws`，不依赖系统 OpenSSL |
-| 序列化 | serde + serde_json | 协议是 JSON；未知字段默认忽略 |
+| 语言 | Go 1.25 | 单二进制、无运行时；交叉编译一步到位 |
+| 界面 | 手写 ANSI（`screen.go` / `widgets.go`） | 不引 TUI 框架：布局与边框自己画，行为可预测、SSH 一致 |
+| 并发 | goroutine + channel | 一条网络、一条读，主 goroutine 做按键与重绘 |
+| 传输 | `gorilla/websocket` + 标准库 `net/http` | 直连服务端 `/ws` 与 `/api/*`，不依赖系统库 |
+| 序列化 | `encoding/json` | 协议是 JSON；未知字段默认忽略 |
 | 平台 | Windows / macOS / Linux | 任何 UTF-8 终端；SSH 可玩 |
 
 **为什么是终端**：这个游戏的玩法是"读文字、看格子地图、敲指令"，
@@ -30,8 +30,9 @@ depends_on: C-00、服务端 docs/01
 
 **为什么不是网页**：需要 WebView/Chromium，发布体积与安全面都不划算。
 
-**为什么是 ratatui 而不是手写 crossterm**：布局（`Layout`）、段落换行、
-颜色样式、`TestBackend` 离屏渲染都是现成的；手写要自己实现双缓冲与宽字符对齐。
+**为什么不用 TUI 框架**：tview / bubbletea 这类库会把布局、按键、刷新节奏都封起来，
+排查"为什么这一行错了"要读框架源码；本项目的界面只有盒子、量表、列表三种原件，
+手写两百行就够，还能对"每行宽度恰好等于终端宽"做单测。
 
 ## 3. 目标（M1–M5）
 

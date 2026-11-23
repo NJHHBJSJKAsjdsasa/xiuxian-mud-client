@@ -2,8 +2,8 @@
 
 ```
 doc_id: C-04
-version: 4.0.0
-updated: 2026-11-22
+version: 4.1.0
+updated: 2026-11-23
 owns: 状态消费方式、重绘策略、时钟与倒计时、本地禁算清单
 depends_on: 服务端 05（P-MSG-02/04）、C-02
 ```
@@ -22,7 +22,7 @@ depends_on: 服务端 05（P-MSG-02/04）、C-02
 ## 2. 重绘策略（终端）
 
 终端没有"脏矩形"也没有重绘请求：主循环每 30ms 走一轮，**每轮全量画一屏**，
-ratatui 自己 diff 出要改的单元格。所以这里的规则不是"什么时候重绘"，而是"一轮里做什么"：
+字符屏自己按行比对签名。所以这里的规则不是"什么时候重绘"，而是"一轮里做什么"：
 
 | 顺序 | 动作 | 说明 |
 |---|---|---|
@@ -46,7 +46,7 @@ ratatui 自己 diff 出要改的单元格。所以这里的规则不是"什么�
 | 日志环形缓冲 | `store::logbuf`（5000 行） | 超出淘汰最早，`C-08` §2 |
 
 排版不做缓存：每帧只为**可见行**拼 `Line`（7 行见闻、一屏表格行），
-宽字符对齐交给 ratatui；这是终端里最省事也最快的做法，10 万行日志也只画看得见的部分。
+宽字符对齐交给 `screen.put`；10 万行日志也只画看得见的部分。
 
 ## 4. 时钟与倒计时
 
@@ -82,10 +82,9 @@ ratatui 自己 diff 出要改的单元格。所以这里的规则不是"什么�
 2. 没有时间戳时，以到达顺序为准：后到者胜。
 3. `ready` 永远最优先：它是重连后的权威快照，到达即清空待合并队列。
 
-## 8. Rust 落点
+## 8. Go 落点
 
-- `AppState` 持有 `player: PlayerView`、`world: WorldView`、`vitals: VitalView`、`logs: LogBuf`、`map_graph: MapGraph`、`battle: Option<BattleView>`；界面只读这些字段。
-- 帧解析失败（`serde_json::Error`）不 panic：记 `tracing::warn!`、把原始帧写进 `logs/decode.log`，然后继续读下一帧。
-  同一会话最多写 10 条，之后只累计计数并在设置页显示"本会话有 N 帧无法解析"。
-- 所有时间戳用 `i64` 毫秒（与服务端一致）；只有展示"HH:MM:SS"时才用 `time` 格式化。
-- `AppState` 不实现 `Clone`：避免有人图省事整份拷贝做对比；需要对比就用 `revision`。
+- `appState` 持有 `player *playerView`、`world *mapView`、`vitals vitalView`、`logs *logBuf`、`graph *mapGraph`；界面只读这些字段。
+- 帧解析失败不 panic：直接丢弃该帧并继续读下一帧；状态层只接受能解出来的结构。
+- 所有时间戳用 `int64` 毫秒（与服务端一致）；只有展示"18:36"时才用 `time` 格式化。
+- 状态整体替换只发生在 `applyState`；其余入口（`applyVital` / `applyMap` / `pushLogs`）都是定点更新。

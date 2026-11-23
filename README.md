@@ -5,24 +5,45 @@
 
 ## 形态
 
-**Rust 写的终端程序（ratatui / crossterm），不是网页。**
-单二进制、无渲染后端、无资源目录：`cargo run` 直接在终端里铺满，SSH 上去也能玩。
+**Go 写的终端程序（TUI），不是网页。**
+
+单二进制、无渲染后端、无资源目录：`go build` 完直接在终端里铺满，SSH 上去也能玩。
+界面的每个字符都由自己画——没有 TUI 框架，也没有 WebView。
 
 理由见 `docs/01-SCOPE.md` §2：这个游戏的玩法是读文字、看格子地图、敲指令，
 字符界面能把它表达清楚，而且没有"半吊子写实"的观感问题。
 
-> 同仓另有 Go 实现 `go/`：纯 Go + 手写 ANSI，不引 TUI 框架，给联调与"临时看一眼"用。
-> 两套走同一套 `/api/*` + `/ws`，界面口径同 `docs/05-UI.md`；构建与按键见 `go/README.md`。
+## 界面
+
+盒子化仪表盘：一条标题栏 + 状态盒 + 去处盒 + 见闻盒 + 目标行 + 按键行。
+不画山水场景，终端里信息密度优先。
+
+```
+ 九州问道 │ 青云·樵径 · 青云郡   春·雨   ● 在线 · 1 人            沈砚 · 凡人  灵石 180
+┌─ 状态 ─────────────────────┐ ┌─ 去处 ──────────────────────────────────────────┐
+│ 身份    凡人 · 战力 42     │ │ ▸ ↑ 中州·落凡台                           10s  │
+│ 气血    ██████████ 50/50   │ │   ↙ 青云·浅滩                              4s  │
+│ 真气    ██████████ 20/20   │ │   → 青云观                                 5s  │
+│ 修为    ████████░░ 90/120  │ │                                                │
+│ 体力    ██████████ 200/200 │ │                                                │
+└────────────────────────────┘ └────────────────────────────────────────────────┘
+┌─ 见闻 ───────────────────────────────────────────────────────────────────────┐
+│ 18:36  你来到青云·樵径。                                                    │
+│ 18:36  【旁白】坊市·掌柜：布告栏上每天换三条，跑得动就接。                  │
+└──────────────────────────────────────────────────────────────────────────────┘
+ ▸ 摸清这条路 · ↑↓ 选路，Enter 就走
+ Space 历练   c 打坐   b 突破   l 四周   / 说话   PgUp 见闻   F1–F8 页面   q 退出
+```
+
+窄屏（< 76 列）把三条命脉压成一行，去处与见闻占满剩余高度。
 
 ## 现状
 
-**M1 已落地**（2026-11-22）：登录 / 建号 / 字符场景 / 见闻 / 路标移动（含赶路倒计时）/
-打坐 / 突破 / 探索 / 舆图，全部在终端里跑通。
+**M1 已落地**（2026-11-23）：登录 / 建号 / 仪表盘主界面 / 见闻 / 路标移动（含赶路倒计时）/
+打坐 / 突破 / 探索 / 舆图 / F1–F8 数据页，全部在终端里跑通。
 
-![主界面](docs/screenshots/main-window.png)
-
-- `src/` 分层：`protocol` / `net` / `store` / `view` / `app` / `tui`。
-- `cargo clippy --all-targets -- -D warnings` 干净，`cargo test` 18 项全绿。
+- 分层：`proto`（协议） / `net`（连接） / `state`（状态） / `app`（交互） / `render`（绘制）。
+- `go vet ./...` 干净，`go test ./...` 41 项全绿。
 - 协议以服务端 `docs/05-PROTOCOL.md` 为准，接入流程看 `docs/12-API.md`。
 
 ## 怎么跑
@@ -32,33 +53,35 @@
 cd ../xianxia && go run ./cmd/server
 
 # 客户端（需要 80×24 以上终端）
-cargo run -- --server ws://127.0.0.1:8080
+go build -o bin/playcli . && ./bin/playcli --server ws://127.0.0.1:8080
 
 # 跳过登录页；还没有角色时自动建号
-cargo run -- --server ws://127.0.0.1:8080 --login 沈砚:test123456 --create 沈砚
+./bin/playcli --server ws://127.0.0.1:8080 --login 沈砚:test123456 --create 沈砚
 
 # 直接看舆图
-cargo run -- --server ws://127.0.0.1:8080 --login 沈砚:test123456 --page map
+./bin/playcli --server ws://127.0.0.1:8080 --login 沈砚:test123456 --page map
 
-# 离屏出一屏（不占终端），再用脚本转 PNG
-cargo run -- --login 沈砚:test123456 --snapshot shot.ansi
-python tools/ansi2png.py shot.ansi shot.png
+# 离屏出一屏纯文本（不占终端，排查时贴这一屏）
+./bin/playcli --login 沈砚:test123456 --snapshot shot.txt --color off
 ```
 
 ## 键位
 
 | 键 | 动作 |
 |---|---|
-| `↑` `↓` | 选路标 |
+| `↑` `↓`（或 `k` `j`） | 选去处 |
 | `Enter` | 前往 |
 | `Space` | 历练 |
 | `c` | 打坐 / 收功 |
 | `b` | 突破 |
 | `l` | 看看四周 |
 | `/` | 说话（`Enter` 送出，`Tab` 换频道，`Esc` 取消） |
+| `PgUp` `PgDn` `Home` `End` | 翻见闻 |
 | `F1`–`F8` | 角色 / 背包 / 技能 / 江湖 / 坊市 / 宗门 / 舆图 / 设置 |
 | `Esc` | 返回 |
+| `o` | 退出登录 |
 | `q` | 退出 |
+| `Ctrl+C` | 强制退出 |
 
 ## 先读哪几份
 
@@ -66,15 +89,16 @@ python tools/ansi2png.py shot.ansi shot.png
 |---|---|---|
 | 1 | [`docs/00-INDEX.md`](docs/00-INDEX.md) | 文档目录与边界 |
 | 2 | [`docs/01-SCOPE.md`](docs/01-SCOPE.md) | 做什么、不做什么 |
-| 3 | [`docs/02-ARCH.md`](docs/02-ARCH.md) | crate 选型、分层、线程模型、目录结构 |
+| 3 | [`docs/02-ARCH.md`](docs/02-ARCH.md) | 包与文件划分、并发模型、目录结构 |
 | 4 | [`docs/03-CONNECTION.md`](docs/03-CONNECTION.md) | 登录、握手、重连 |
-| 5 | [`docs/05-UI.md`](docs/05-UI.md) | 终端布局、字符场景、按键、配色 |
+| 5 | [`docs/05-UI.md`](docs/05-UI.md) | 仪表盘布局、组件、按键、配色 |
 | 6 | [`docs/09-ROADMAP.md`](docs/09-ROADMAP.md) | 里程碑与完成定义 |
 
 ## 技术栈
 
-- Rust（edition 2024）+ tokio
-- 界面：`ratatui` 0.29 + `crossterm` 0.28
-- 传输：`tokio-tungstenite` + `rustls`；登录用 `reqwest`（rustls）
-- 序列化：`serde` / `serde_json`
-- 测试：`cargo test` + ratatui `TestBackend` 快照 + 服务端脚本对照
+- Go 1.25，模块名 `xiuxian-playcli`
+- 界面：手写 ANSI（`screen.go` / `widgets.go`），不引 TUI 框架
+- 传输：`gorilla/websocket`（WS）+ 标准库 `net/http`（REST）
+- 终端：`golang.org/x/term`（raw mode 与窗口尺寸）
+- 序列化：`encoding/json`
+- 测试：`go test ./...`，含文本宽度、字符屏、按键转义、状态归并与"每行宽度不变式"

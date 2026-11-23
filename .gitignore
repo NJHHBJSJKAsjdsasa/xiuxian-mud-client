@@ -1,8 +1,7 @@
-/target
-*.local
 .DS_Store
 Thumbs.db
+*.local
 
-# Go 客户端的构建产物
-/go/bin
-/go/*.exe
+# Go 构建产物
+/bin
+/*.exe

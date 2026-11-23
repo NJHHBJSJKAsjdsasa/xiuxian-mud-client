@@ -108,6 +108,8 @@ func thousands(n int64) string {
 	return b.String()
 }
 
+func itoa64(n int64) string { return strconv.FormatInt(n, 10) }
+
 func abs64(n int64) int64 {
 	if n < 0 {
 		return -n
@@ -138,6 +140,11 @@ func fmtCountdown(ms int64) string {
 	}
 	total := (ms + 999) / 1000
 	return fmt.Sprintf("%02d:%02d", total/60, total%60)
+}
+
+// fmtHM 毫秒时间戳 → 东八区 HH:MM（见闻行首的时间）。
+func fmtHM(ms int64) string {
+	return time.UnixMilli(ms).In(time.FixedZone("CST", 8*3600)).Format("15:04")
 }
 
 // fmtHMS 毫秒时间戳 → 东八区 HH:MM:SS。

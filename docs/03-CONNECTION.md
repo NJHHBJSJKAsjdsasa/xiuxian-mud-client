@@ -2,8 +2,8 @@
 
 ```
 doc_id: C-03
-version: 4.0.0
-updated: 2026-11-22
+version: 4.1.0
+updated: 2026-11-23
 owns: 登录流程、协议版本握手、心搏、重连状态机、关闭码处置、终端生命周期
 depends_on: 服务端 05（P-REST-01/02、P-MSG-01/05、关闭码表）、12（快速开始）
 ```
@@ -97,21 +97,20 @@ CONNECTING ──open──► HELLO ──ready──► ONLINE ──close(cod
 - **退出**：按 `q`（或 `Ctrl+C`）时发 `{"t":"close"}` 或 WS Close(1000)，最多等 300ms，
   然后 `runtime.shutdown_timeout(200ms)`。不等待也能退出，但服务端会多留一条超时记录。
 - **挂后台**：终端切走后仍按 30ms 轮询；不做省电降频（CPU 占用本就低于 1%）。
-- **崩溃**：装 `std::panic::set_hook`，先 `disable_raw_mode` + `LeaveAlternateScreen` 把终端恢复，
-  再把 panic 信息写 `logs/panic.log` 并打到 stderr——终端程序不能弹窗，也不该留下一个乱码屏幕。
-  release 保留 unwind，开发包保留 backtrace。
+- **崩溃**：`defer` 里先恢复终端（`term.Restore` + 退出备用屏 + 显示光标），
+  再把错误打到 stderr——终端程序不能弹窗，也不该留下一个乱码屏幕。
 
-## 7. 实现落点（Rust）
+## 7. 实现落点（Go）
 
 | 关注点 | 落点 | 说明 |
 |---|---|---|
-| 连接与重连 | `src/net/ws.rs` | 一个 task 管连接生命周期，重连时重建流与任务 |
-| REST | `src/net/http.rs` | `reqwest` + rustls；只三个端点 |
-| 帧编解码 | `src/protocol/frame.rs` | `In { t, n, a, d }` / `Out`；`serde_json` 直接映射 |
-| 关闭码 | `src/protocol/err.rs` | 常量与 `match`，不散落数字 |
-| 唤醒 UI | `src/net/ws.rs` → `NetEvent` 队列 | 网络只往有界队列（4096）里塞事件；主循环每 30ms drain 一次，界面不被动重绘 |
-| 超时 | `tokio::time::timeout` | hello / ready / REST / 单动作各有独立超时 |
-| 登录态 | `src/view.rs` | `View` 枚举 + `LoginForm`（loading / error / focus） |
+| 连接与重连 | `net.go` 的 `runNet` / `wsSession` | 一个 goroutine 管连接生命周期，重连时重建连接 |
+| REST | `net.go` 的 `postJSON` / `login` / `logout` | 标准库 `net/http`，8s 超时；只三个端点 |
+| 帧编解码 | `proto.go` 的 `inFrame` 与各视图结构 | `encoding/json` 直接映射，未知字段忽略 |
+| 关闭码 | `proto.go` 的 `classifyClose` | 常量与 `switch`，不散落数字 |
+| 唤醒 UI | `evs chan netEvent` | 网络只往有界队列（2048）里塞事件；主循环 select 到就重绘 |
+| 超时 | `net.Dialer.HandshakeTimeout` + `lastRx` 检查 | 握手 8s；60s 没收到任何帧按心跳超时断开 |
+| 登录态 | `keys.go` 的 `uiState` | `viewKind` + `loginForm`（loading / err / focus） |
 
 ## 8. 待确认的实现细节
 

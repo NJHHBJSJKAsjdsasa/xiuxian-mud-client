@@ -65,45 +65,47 @@ func assertFrameWidth(t *testing.T, a *app, w, h int) []string {
 
 func TestRenderGameLayout(t *testing.T) {
 	a := testApp()
-	frame := assertFrameWidth(t, a, 110, 36)
+	frame := assertFrameWidth(t, a, 100, 30)
 	all := strings.Join(frame, "\n")
-	if !strings.Contains(frame[0], "青云·樵径") || !strings.Contains(frame[0], "青云郡") {
-		t.Errorf("顶栏缺地名：%q", frame[0])
+
+	if !strings.Contains(frame[0], "九州问道") || !strings.Contains(frame[0], "青云·樵径") {
+		t.Errorf("标题栏缺品牌或地名：%q", frame[0])
 	}
-	if !strings.Contains(frame[0], "沈砚") || !strings.Contains(frame[0], "灵石 180") {
-		t.Errorf("顶栏缺角色信息：%q", frame[0])
+	if !strings.Contains(frame[0], "在线") || !strings.Contains(frame[0], "沈砚") {
+		t.Errorf("标题栏缺连接状态或道号：%q", frame[0])
 	}
-	if !strings.Contains(all, "中州·落") || !strings.Contains(all, "青云·浅滩") {
-		t.Error("路标缺地名")
+	if strings.Count(all, "┌") < 2 || strings.Count(all, "┘") < 2 {
+		t.Error("至少应有状态/去处/见闻三个盒子")
+	}
+	if !strings.Contains(all, "气血") || !strings.Contains(all, "█") || !strings.Contains(all, "░") {
+		t.Error("状态盒缺量表")
+	}
+	if !strings.Contains(all, "中州·落凡台") || !strings.Contains(all, "10s") {
+		t.Error("去处盒缺地名或耗时")
+	}
+	if !strings.Contains(all, "▸") {
+		t.Error("去处列表缺选中标记")
 	}
 	if !strings.Contains(all, "布告栏上每天换三条") {
-		t.Error("见闻缺日志")
+		t.Error("见闻盒缺日志")
 	}
-	if !strings.Contains(all, "气血[##########] 50/50") {
-		t.Error("行动条缺满格血条")
-	}
-	if !strings.Contains(all, "F1–F8 页面") {
-		t.Error("提示行缺按键表")
-	}
-	if !strings.Contains(all, "Spring") && !strings.Contains(all, "春") {
-		t.Error("顶栏缺季节")
+	if !strings.Contains(all, "寻个去处") || !strings.Contains(all, "F1–F8 页面") {
+		t.Error("底部缺目标行或按键行")
 	}
 }
 
 func TestRenderLoginPage(t *testing.T) {
 	a := testApp()
 	a.ui.view = viewLogin
-	assertFrameWidth(t, a, 80, 24)
-	frame := a.render(80, 24).frame()
+	frame := assertFrameWidth(t, a, 80, 24)
 	all := strings.Join(frame, "\n")
-	if !strings.Contains(all, "九 州 问 道") {
-		t.Error("登录页缺标题")
+	for _, want := range []string{"登录", "九州问道", "服务器", "道号", "密码", "Ctrl+R"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("登录页缺 %q", want)
+		}
 	}
-	if !strings.Contains(all, "服务器") || !strings.Contains(all, "道号") || !strings.Contains(all, "密码") {
-		t.Error("登录页缺输入框")
-	}
-	if !strings.Contains(all, "[ 登录 ]") {
-		t.Error("登录页缺提交按钮")
+	if !strings.Contains(all, "┌") {
+		t.Error("登录页应是带边框的盒子")
 	}
 }
 
@@ -111,9 +113,8 @@ func TestRenderCreatePage(t *testing.T) {
 	a := testApp()
 	a.ui.view = viewCreate
 	a.ui.createName = "沈砚"
-	assertFrameWidth(t, a, 80, 24)
-	all := strings.Join(a.render(80, 24).frame(), "\n")
-	if !strings.Contains(all, "踏 入 凡 界") || !strings.Contains(all, "沈砚") {
+	all := strings.Join(assertFrameWidth(t, a, 80, 24), "\n")
+	if !strings.Contains(all, "踏入凡界") || !strings.Contains(all, "沈砚") {
 		t.Error("建号页缺标题或输入内容")
 	}
 }
@@ -133,10 +134,19 @@ func TestRenderCharacterPageContent(t *testing.T) {
 	a := testApp()
 	a.ui.page = pageCharacter
 	all := strings.Join(a.render(100, 30).frame(), "\n")
-	for _, want := range []string{"境界", "灵根", "战力", "根骨", "功德 / 轮回", "丹毒"} {
+	for _, want := range []string{"境界", "灵根", "战力", "神识", "功德轮回", "丹毒"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("角色页缺 %q", want)
 		}
+	}
+}
+
+func TestRenderBagPageContent(t *testing.T) {
+	a := testApp()
+	a.ui.page = pageBag
+	all := strings.Join(a.render(100, 30).frame(), "\n")
+	if !strings.Contains(all, "止血草") || !strings.Contains(all, "材料") {
+		t.Error("背包页缺物品或类别")
 	}
 }
 
@@ -144,7 +154,7 @@ func TestRenderMapPageLegend(t *testing.T) {
 	a := testApp()
 	a.ui.page = pageMap
 	all := strings.Join(a.render(100, 30).frame(), "\n")
-	if !strings.Contains(all, "◎ 当前") {
+	if !strings.Contains(all, "◎ 当前") || !strings.Contains(all, "只是望见") {
 		t.Error("舆图缺图例")
 	}
 	if !strings.Contains(all, "◎") {
@@ -160,12 +170,27 @@ func TestRenderTinyTerminalDoesNotPanic(t *testing.T) {
 	assertFrameWidth(t, a, 40, 12)
 }
 
+func TestRenderNarrowUsesStatusLine(t *testing.T) {
+	a := testApp()
+	frame := assertFrameWidth(t, a, 66, 22)
+	found := false
+	for _, l := range frame {
+		if strings.Contains(l, "气血") && strings.Contains(l, "真气") && strings.Contains(l, "修为") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("窄屏缺单行状态摘要：\n%s", strings.Join(frame, "\n"))
+	}
+}
+
 func TestRenderTypingHint(t *testing.T) {
 	a := testApp()
 	a.ui.typing = true
 	a.ui.chatText = "有人在吗"
-	all := strings.Join(a.render(110, 36).frame(), "\n")
-	if !strings.Contains(all, "世界> 有人在吗▌") {
+	all := strings.Join(a.render(100, 30).frame(), "\n")
+	if !strings.Contains(all, "世界 > 有人在吗▌") {
 		t.Error("输入行未显示频道与内容")
 	}
 }
@@ -173,21 +198,30 @@ func TestRenderTypingHint(t *testing.T) {
 func TestRenderObjectiveTravelling(t *testing.T) {
 	a := testApp()
 	a.st.player.Travel = &travelView{To: "b", Name: "青云·浅滩", ArriveAt: a.st.serverNow() + 7000}
-	all := strings.Join(a.render(110, 36).frame(), "\n")
+	all := strings.Join(a.render(100, 30).frame(), "\n")
 	if !strings.Contains(all, "赶路中") || !strings.Contains(all, "前往 青云·浅滩") {
-		t.Error("赶路时目标卡未更新")
+		t.Error("赶路时目标行未更新")
 	}
 	if !strings.Contains(all, "00:07") {
 		t.Error("倒计时显示不对")
 	}
 }
 
-func TestRenderOfflineDimActions(t *testing.T) {
+func TestRenderOfflineBadge(t *testing.T) {
 	a := testApp()
 	a.st.conn = connStatus{kind: connOffline, detail: "已退出登录"}
 	frame := assertFrameWidth(t, a, 100, 30)
 	if !strings.Contains(frame[0], "已退出登录") {
-		t.Errorf("顶栏应显示离线原因：%q", frame[0])
+		t.Errorf("标题栏应显示离线原因：%q", frame[0])
+	}
+}
+
+func TestRenderToast(t *testing.T) {
+	a := testApp()
+	a.ui.toast("连接中断，正在重连…", true)
+	all := strings.Join(a.render(100, 30).frame(), "\n")
+	if !strings.Contains(all, "连接中断，正在重连…") {
+		t.Error("toast 未画出")
 	}
 }
 

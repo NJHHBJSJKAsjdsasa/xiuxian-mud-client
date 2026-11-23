@@ -71,11 +71,14 @@ func TestCountdown(t *testing.T) {
 	}
 }
 
-func TestBar(t *testing.T) {
-	if got := bar(50, 100, 10); got != "[#####-----]" {
+func TestGauge(t *testing.T) {
+	if got := gauge(50, 100, 4); got != "██░░" {
 		t.Errorf("得到 %q", got)
 	}
-	if got := bar(0, 0, 4); got != "[----]" {
+	if got := gauge(0, 0, 3); got != "░░░" {
 		t.Errorf("max=0 时应全空，得到 %q", got)
+	}
+	if got := gauge(200, 200, 3); got != "███" {
+		t.Errorf("满血应全实心，得到 %q", got)
 	}
 }

@@ -2,8 +2,8 @@
 
 ```
 doc_id: C-09
-version: 4.0.0
-updated: 2026-11-22
+version: 5.0.0
+updated: 2026-11-23
 owns: M1–M5 里程碑、每档的完成定义与依赖的协议面
 depends_on: C-01、C-02、C-05、C-08
 ```
@@ -11,25 +11,26 @@ depends_on: C-01、C-02、C-05、C-08
 ## 1. 分档原则
 
 - 每一档都能**独立可玩**，不是"半成品拼到最后一起验收"。
-- 每档结束跑一次 `C-08` 的自查清单 + `cargo test` / `clippy` / `doc-check`。
+- 每档结束跑一次 `C-08` 的自查清单 + `go test` / `go vet` / `doc-check`。
 - 涉及协议面的档，先在服务端仓库里找到对应的验收脚本，照着它的输出对字段。
 - 每档都给一个能直接运行的 release 包；不给「只有开发机能跑」的中间态。
 
 ## 2. M1 · 终端骨架与主循环
 
-**状态：已完成（2026-11-22）**。落地内容与实测：
+**状态：已完成（2026-11-23，Go 重写）**。落地内容与实测：
 
 | 项 | 结果 |
 |---|---|
-| 工程 | `src/` 9 层（protocol / net / store / view / app / tui / util / config / main）已落盘 |
-| 可运行 | `cargo run -- --server ws://127.0.0.1:8080`；`--login` / `--create` / `--page` / `--move` / `--snapshot` 为联调参数 |
-| 主循环 | 登录 → 建号 → 场景与路标 → 移动（10s 赶路倒计时）→ 到达刷新；实测通过 |
+| 工程 | 20 个 Go 文件：`proto` / `net` / `state` / `app` / `keys` / `screen` / `widgets` / `render` / `pages` / `text` / `theme` / `main` |
+| 可运行 | `go build -o bin/playcli . && ./bin/playcli --server ws://127.0.0.1:8080`；`--login` / `--create` / `--page` / `--move` / `--snapshot` 为联调参数 |
+| 主循环 | 登录 → 建号 → 仪表盘主界面 → 移动（10s 赶路倒计时）→ 到达刷新；真实服务端实测通过 |
 | 舆图 | 累积已探索节点，按服务端 `x`/`y` 铺在字符网格上，`◎ ● ○` 三态 |
-| 质量门 | `cargo clippy --all-targets -- -D warnings` 干净；`cargo test` 18 项全绿；`doc-check` 11 份一致 |
+| 质量门 | `go vet` 干净；`go test` 41 项全绿；`doc-check` 11 份一致 |
 | 已知边界 | 历练/突破按服务端境界限制会被拒（凡人不能在中州历练），客户端如实显示 `E-NOREALM` |
 
-**工程**：`Cargo.toml`（ratatui/tokio/serde）、`protocol/` 全部帧类型、`net/ws.rs` 握手与重连、
-`store/` 基础结构、`app.rs` 的按键→Intent→网络命令循环、`tui/` 七段布局与 ASCII 场景、
+**工程**：`go.mod`（仅 websocket + term）、`proto.go` 全部帧类型、`net.go` 握手与重连、
+`state.go` 状态归并、`app.go` 的按键→意图→网络命令循环、`render.go` 标题栏 + 三盒布局、
+`pages.go` 数据页与舆图、`screen.go`/`widgets.go` 字符屏与盒子组件，
 登录页/建号页/主界面/数据页/舆图/聊天输入。
 
 **玩法**：登录、建号、`ready` 目录、日志、状态条、出口列表、移动、历练、打坐、突破。
@@ -46,7 +47,7 @@ depends_on: C-01、C-02、C-05、C-08
 
 ## 3. M2 · 战斗与秘境
 
-**工程**：`store/fight.rs`、`tui/` 的战斗面板（怪卡块、字符血条、技能行、回合倒计时）、战报逐行队列。
+**工程**：`battle.go`（战斗状态）、`render.go` 的战斗盒（敌方量表、技能行、回合倒计时）、战报逐行队列。
 
 **玩法**：`battle`（单怪/三怪/组队）、目标选择、逐行战报、秘境进出与切层、掉线重连回层。
 
@@ -92,7 +93,7 @@ depends_on: C-01、C-02、C-05、C-08
 **完成定义**
 
 - 2 小时挂机 RSS 平稳（增长 < 15%）；待机 CPU < 1%。
-- 80×24 到 200×60 全部可用，场景段随高度伸缩。
+- 80×24 到 200×60 全部可用：窄屏单行状态摘要，宽屏左右分栏，见闻吃剩余高度。
 - 浅底配色下正文对比度 ≥ 4.5:1。
 - 所有拒绝都有具体原因，不出现「操作失败」。
 - 三个平台各一个可直接运行的产物，README 写清如何放行 SmartScreen / Gatekeeper。
