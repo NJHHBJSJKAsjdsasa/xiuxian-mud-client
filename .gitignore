@@ -2,3 +2,7 @@
 *.local
 .DS_Store
 Thumbs.db
+
+# Go 客户端的构建产物
+/go/bin
+/go/*.exe
