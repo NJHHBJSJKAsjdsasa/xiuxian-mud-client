@@ -251,3 +251,14 @@ func TestSecondFrameSkipsUnchangedLines(t *testing.T) {
 		t.Fatalf("局部更新应只写少量字节：首帧 %d，本帧 %d", b1.Len(), b3.Len())
 	}
 }
+
+func TestRenderSettingsPageContent(t *testing.T) {
+	a := testApp()
+	a.ui.page = pageSettings
+	all := strings.Join(a.render(100, 30).frame(), "\n")
+	for _, want := range []string{"服务器", "协议", "连接", "配置", "playcli.json"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("设置页缺 %q", want)
+		}
+	}
+}
