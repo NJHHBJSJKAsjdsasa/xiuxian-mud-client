@@ -107,8 +107,9 @@ type playerView struct {
 
 type travelView struct {
 	To       string `json:"to"`
-	Name     string `json:"name"`
+	Name     string `json:"toName"`
 	ArriveAt int64  `json:"arriveAt"`
+	CostMs   int64  `json:"costMs"`
 }
 
 type rootView struct {

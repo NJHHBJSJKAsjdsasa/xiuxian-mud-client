@@ -163,8 +163,16 @@ func (a *app) handleEvent(ev netEvent) {
 		a.st.pushLogs(e.lines)
 		a.logBack = 0
 	case evMap:
+		oldLoc := ""
+		if a.st.world != nil {
+			oldLoc = a.st.world.Loc
+		}
 		a.st.applyMap(e.m)
-		a.ui.selectedExit = 0
+		// 只有真的换了节点才把选中项归零：`look` 的应答、定时补拉的同一节点帧
+		// 都不该把玩家刚选好的去处打回第一项。
+		if e.m.Loc != oldLoc {
+			a.ui.selectedExit = 0
+		}
 		if a.pendingMove != nil {
 			i := *a.pendingMove
 			a.pendingMove = nil
@@ -321,6 +329,22 @@ func (a *app) keyMain(k key) {
 		}
 	}
 
+	// 数据页只认"返回 / 退出 / 说话 / 翻见闻"，不要让 ↑↓ Enter 去改主界面的选中项。
+	if a.ui.page != pageGame {
+		switch {
+		case k.is("esc"):
+			a.ui.page = pageGame
+		case k.isRune('q'):
+			a.quit = true
+		case k.isRune('/'):
+			a.ui.typing = true
+			a.ui.chatText = ""
+		case k.is("pgup"), k.is("pgdn"), k.is("home"), k.is("end"):
+			a.scrollLogs(k)
+		}
+		return
+	}
+
 	switch {
 	case k.is("esc"):
 		if a.ui.page != pageGame {
@@ -356,6 +380,14 @@ func (a *app) keyMain(k key) {
 				a.act(actMove, map[string]any{"to": ex.To})
 			}
 		}
+	case k.is("pgup"), k.is("pgdn"), k.is("home"), k.is("end"):
+		a.scrollLogs(k)
+	}
+}
+
+// scrollLogs 翻见闻：PgUp 往上（看更早），PgDn 回最新，Home 跳到最早，End 回底。
+func (a *app) scrollLogs(k key) {
+	switch {
 	case k.is("pgup"):
 		if n := a.st.logs.len() - 1; n > 0 {
 			a.logBack = min(a.logBack+5, n)
