@@ -381,3 +381,63 @@ func TestRenderTalkOverlay(t *testing.T) {
 		}
 	}
 }
+
+func TestMapPageIsDeterministic(t *testing.T) {
+	a := testApp()
+	a.ui.page = pageMap
+	first := strings.Join(assertFrameWidth(t, a, 100, 30), "\n")
+	for i := 0; i < 12; i++ {
+		got := strings.Join(assertFrameWidth(t, a, 100, 30), "\n")
+		if got != first {
+			t.Fatalf("第 %d 次重绘与首帧不同（舆图内容必须每帧一致）：\n%s", i+2, got)
+		}
+	}
+
+	// 同一份数据重绘不该写出任何字节：脏行跳过依赖内容稳定。
+	var b1, b2 bytes.Buffer
+	w1 := bufio.NewWriter(&b1)
+	a.render(100, 30).render(w1, colorOff)
+	if b1.Len() == 0 {
+		t.Fatal("首帧应有输出")
+	}
+	w2 := bufio.NewWriter(&b2)
+	a.render(100, 30).render(w2, colorOff)
+	if b2.Len() != 0 {
+		t.Fatalf("舆图第二帧仍写了 %d 字节：%q", b2.Len(), b2.String())
+	}
+}
+
+func TestSortedNodesCurrentWinsOnSameCell(t *testing.T) {
+	g := newMapGraph()
+	m := &mapView{
+		Loc: "a", Name: "甲", X: intp(5), Y: intp(5),
+		Exits: []exitView{{To: "b", Name: strp("乙"), OK: true, X: intp(5), Y: intp(5)}},
+	}
+	g.observe(m)
+	layout := g.layout("a")
+	pos := func(px, py float64) (int, int) { return int(px) + 10, int(py) + 10 }
+
+	for i := 0; i < 12; i++ {
+		nodes := sortedNodes(g, layout, "a", pos, 0, 0, 100, 30)
+		if len(nodes) != 2 {
+			t.Fatalf("应有 2 个节点，实为 %d", len(nodes))
+		}
+		if nodes[len(nodes)-1].id != "a" || nodes[len(nodes)-1].ch != '◎' {
+			t.Fatalf("同格时当前节点应最后画：%+v", nodes)
+		}
+	}
+}
+
+func TestSortedEdgesBlockedFirst(t *testing.T) {
+	g := newMapGraph()
+	g.edges[[2]string{"a", "b"}] = &mapEdge{ok: true}
+	g.edges[[2]string{"a", "c"}] = &mapEdge{ok: false}
+	g.edges[[2]string{"a", "d"}] = &mapEdge{ok: true}
+	lines := sortedEdges(g)
+	if len(lines) != 3 || lines[0].e.ok {
+		t.Fatalf("断路应排在通路前面：%+v", lines)
+	}
+	if lines[1].key[1] != "b" || lines[2].key[1] != "d" {
+		t.Fatalf("通路按 id 排序不稳定：%+v", lines)
+	}
+}

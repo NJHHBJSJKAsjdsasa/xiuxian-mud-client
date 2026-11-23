@@ -2,7 +2,7 @@
 
 ```
 doc_id: C-09
-version: 5.2.0
+version: 5.2.1
 updated: 2026-11-23
 owns: M1–M5 里程碑、每档的完成定义与依赖的协议面
 depends_on: C-01、C-02、C-05、C-08
@@ -25,7 +25,7 @@ depends_on: C-01、C-02、C-05、C-08
 | 可运行 | `go build -o bin/playcli . && ./bin/playcli --server ws://127.0.0.1:8080`；`--login` / `--create` / `--page` / `--move` / `--snapshot` 为联调参数 |
 | 主循环 | 登录 → 建号 → 仪表盘主界面 → 移动（10s 赶路倒计时）→ 到达刷新；真实服务端实测通过 |
 | 舆图 | 累积已探索节点，按服务端 `x`/`y` 铺在字符网格上，`◎ ● ○` 三态 |
-| 质量门 | `go vet` 干净；`go test` 105 项全绿；`doc-check` 11 份一致 |
+| 质量门 | `go vet` 干净；`go test` 108 项全绿；`doc-check` 11 份一致 |
 | 已知边界 | 历练/突破按服务端境界限制会被拒（凡人不能在中州历练），客户端如实显示 `E-NOREALM` |
 
 **工程**：`go.mod`（仅 websocket + term）、`proto.go` 全部帧类型、`net.go` 握手与重连、

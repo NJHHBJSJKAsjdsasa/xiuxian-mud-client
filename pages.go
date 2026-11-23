@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 )
 
@@ -39,9 +40,12 @@ func (a *app) drawMap(sc *screen, x, y, w, h int) {
 		return cx + int(math.Round(px*scale)), cy + int(math.Round(py*scale*0.5))
 	}
 
-	for k, e := range g.edges {
-		a0, ok1 := layout[k[0]]
-		b0, ok2 := layout[k[1]]
+	// 边与节点都从 map 里取。直接 range 的顺序每帧都不同：重叠处的字符
+	// 与地名标签会互相抢位置，屏幕上看就是"地点闪来闪去"（4Hz 重绘）。
+	// 这里全部排序后再画，同一份数据每帧必须画出同一屏。
+	for _, ln := range sortedEdges(g) {
+		a0, ok1 := layout[ln.key[0]]
+		b0, ok2 := layout[ln.key[1]]
 		if !ok1 || !ok2 {
 			continue
 		}
@@ -57,7 +61,7 @@ func (a *app) drawMap(sc *screen, x, y, w, h int) {
 			}
 			if c := sc.buf[py*sc.w+px]; c.ch == ' ' {
 				ch, st := '·', fg(colFaint)
-				if !e.ok {
+				if !ln.e.ok {
 					ch, st = 'x', fg(colBad)
 				}
 				sc.set(px, py, ch, st)
@@ -65,27 +69,107 @@ func (a *app) drawMap(sc *screen, x, y, w, h int) {
 		}
 	}
 
-	for id, p := range layout {
-		gx, gy := pos(p[0], p[1])
-		if gx <= x || gx >= x+w-1 || gy <= y || gy >= y+h-2 {
-			continue
+	// 先画所有节点，再统一放标签：节点之间的位置竞争按优先级收口
+	// （望见 → 到过 → 当前），当前节点最后画，同格时一定留下 ◎。
+	nodes := sortedNodes(g, layout, m.Loc, pos, x, y, w, h)
+	for _, n := range nodes {
+		sc.set(n.gx, n.gy, n.ch, n.st)
+	}
+	// 标签按"重要度 → 屏幕位置"排序：当前节点先占位，其次到过、望见；
+	// 同重要度再按上→下、左→右。相邻标签谁先占位不再随机，位置也就不会跳。
+	labels := append([]mapNodeDraw(nil), nodes...)
+	sort.Slice(labels, func(i, j int) bool {
+		if labels[i].prio != labels[j].prio {
+			return labels[i].prio > labels[j].prio
 		}
-		n := g.nodes[id]
-		ch, st := '○', fg(colFaint)
-		switch {
-		case id == m.Loc:
-			ch, st = '◎', fgBold(colAccent)
-		case n != nil && n.visited:
-			ch, st = '●', fg(colDim)
+		if labels[i].gy != labels[j].gy {
+			return labels[i].gy < labels[j].gy
 		}
-		sc.set(gx, gy, ch, st)
-		if n != nil && n.name != "" {
-			placeLabel(sc, truncateChars(mapLabel(n.name), 5), gx, gy, st, y, h)
+		if labels[i].gx != labels[j].gx {
+			return labels[i].gx < labels[j].gx
+		}
+		return labels[i].id < labels[j].id
+	})
+	for _, n := range labels {
+		if n.name != "" {
+			placeLabel(sc, truncateChars(mapLabel(n.name), 5), n.gx, n.gy, n.st, y, h)
 		}
 	}
 
 	legend := fmt.Sprintf("◎ 当前   ● 到过   ○ 只是望见    已记 %d 处", len(g.nodes))
 	sc.put(x, y+h-1, truncateWidth(legend, w), fg(colFaint))
+}
+
+// mapEdgeLine 是排好序的一条边。断路排在通路前面：两者共用一格时
+// 留 x 比留 · 信息更明确，也保证每帧一致。
+type mapEdgeLine struct {
+	key [2]string
+	e   *mapEdge
+}
+
+func sortedEdges(g *mapGraph) []mapEdgeLine {
+	out := make([]mapEdgeLine, 0, len(g.edges))
+	for k, e := range g.edges {
+		out = append(out, mapEdgeLine{key: k, e: e})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].e.ok != out[j].e.ok {
+			return !out[i].e.ok
+		}
+		if out[i].key[0] != out[j].key[0] {
+			return out[i].key[0] < out[j].key[0]
+		}
+		return out[i].key[1] < out[j].key[1]
+	})
+	return out
+}
+
+// mapNodeDraw 是一个已定位的节点：prio 越大越后画（当前节点盖住其它符号）。
+type mapNodeDraw struct {
+	id   string
+	gx   int
+	gy   int
+	ch   rune
+	st   style
+	prio int
+	name string
+}
+
+func sortedNodes(g *mapGraph, layout map[string][2]float64, cur string,
+	pos func(float64, float64) (int, int), x, y, w, h int) []mapNodeDraw {
+
+	ids := make([]string, 0, len(layout))
+	for id := range layout {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	out := make([]mapNodeDraw, 0, len(ids))
+	for _, id := range ids {
+		p := layout[id]
+		gx, gy := pos(p[0], p[1])
+		if gx <= x || gx >= x+w-1 || gy <= y || gy >= y+h-2 {
+			continue
+		}
+		n := g.nodes[id]
+		nd := mapNodeDraw{id: id, gx: gx, gy: gy, ch: '○', st: fg(colFaint), prio: 0}
+		if n != nil {
+			nd.name = n.name
+			if n.visited {
+				nd.ch, nd.st, nd.prio = '●', fg(colDim), 1
+			}
+		}
+		if id == cur {
+			nd.ch, nd.st, nd.prio = '◎', fgBold(colAccent), 2
+		}
+		out = append(out, nd)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].prio != out[j].prio {
+			return out[i].prio < out[j].prio
+		}
+		return out[i].id < out[j].id
+	})
+	return out
 }
 
 // placeLabel 给节点找一块能写字的地方：右边 → 左边 → 上下。
