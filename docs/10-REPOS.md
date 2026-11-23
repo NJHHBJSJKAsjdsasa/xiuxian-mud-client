@@ -2,7 +2,7 @@
 
 ```
 doc_id: C-10
-version: 4.1.1
+version: 4.1.2
 updated: 2026-11-23
 owns: 客户端仓的克隆、密钥、日常循环、与服务端的协议同步、构建发布与排错
 depends_on: C-00、C-02、C-03、服务端 docs/05、服务端 docs/13
@@ -34,7 +34,7 @@ depends_on: C-00、C-02、C-03、服务端 docs/05、服务端 docs/13
 git clone git@github-client:NJHHBJSJKAsjdsasa/xiuxian-mud-client.git client
 cd client
 python tools/doc-check.py     # 文档矩阵与链接
-go build -o bin/playcli .     # 首次拉依赖（约 10 秒）；Windows 用 bin/playcli.exe
+make build                    # 首次拉依赖（约 10 秒）；同时产出 bin/playcli 与 bin/playcli.exe
 ./bin/playcli --server ws://127.0.0.1:8080
 ```
 

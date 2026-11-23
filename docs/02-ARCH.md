@@ -2,7 +2,7 @@
 
 ```
 doc_id: C-02
-version: 5.0.0
+version: 5.0.1
 updated: 2026-11-23
 owns: 技术选型、依赖、分层、目录结构、并发模型、模块依赖规则
 depends_on: C-01、C-03、C-04、C-05
@@ -47,6 +47,7 @@ depends_on: C-01、C-03、C-04、C-05
 
 ```
 client/
+├── Makefile          make build / test / check（Windows 同时产出 .exe）
 ├── go.mod / go.sum
 ├── main.go          参数、备屏、主循环、离屏快照
 ├── config.go        playcli.json 读写
