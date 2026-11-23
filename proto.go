@@ -21,6 +21,13 @@ const (
 	actChat         = "chat"
 	actBattle       = "battle"
 	actEncounter    = "encounter"
+	actUse          = "use"
+	actEquip        = "equip"
+	actUnequip      = "unequip"
+	actSell         = "sell"
+	actBuy          = "buy"
+	actSetSkills    = "setSkills"
+	actTalk         = "talk"
 )
 
 // 错误码：只有需要特殊处置的才列出来。
@@ -54,6 +61,17 @@ func actFrame(seq int64, action string, data any) []byte {
 		data = map[string]any{}
 	}
 	b, _ := json.Marshal(map[string]any{"t": "act", "n": seq, "a": action, "d": data})
+	return b
+}
+
+// cmdFrame 是服务端的文本指令通道（12-API §5.3）：t=cmd，服务端自己解析成动作。
+// 客户端不重实现一套命令解析，只负责把整句送过去。
+func cmdFrame(seq int64, text string) []byte {
+	b, _ := json.Marshal(map[string]any{
+		"t": "cmd",
+		"n": seq,
+		"d": map[string]any{"text": text},
+	})
 	return b
 }
 
@@ -271,16 +289,32 @@ type npcView struct {
 	Title string `json:"title"`
 }
 
+// catalogView 是 ready 里的"货架"：开店卖什么、能学什么，服务端只下发一次。
+type catalogView struct {
+	Shop []shopItem `json:"shop"`
+}
+
+type shopItem struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Kind  string `json:"kind"`
+	Price int64  `json:"price"`
+	Min   int    `json:"minStage"`
+	Sell  int64  `json:"sell"`
+	Desc  string `json:"desc"`
+}
+
 type readyView struct {
-	Proto     int         `json:"proto"`
-	MinProto  int         `json:"minProto"`
-	HasChar   *bool       `json:"hasChar"`
-	Player    *playerView `json:"player"`
-	Presence  int64       `json:"presence"`
-	ChatHist  []chatMsg   `json:"chatHist"`
-	ServerNow int64       `json:"serverNow"`
-	Season    string      `json:"season"`
-	Daypart   string      `json:"daypart"`
+	Proto     int          `json:"proto"`
+	MinProto  int          `json:"minProto"`
+	HasChar   *bool        `json:"hasChar"`
+	Player    *playerView  `json:"player"`
+	Presence  int64        `json:"presence"`
+	ChatHist  []chatMsg    `json:"chatHist"`
+	Catalog   *catalogView `json:"catalog"`
+	ServerNow int64        `json:"serverNow"`
+	Season    string       `json:"season"`
+	Daypart   string       `json:"daypart"`
 	World     struct {
 		Online int64 `json:"online"`
 	} `json:"world"`

@@ -36,6 +36,12 @@ func (a *app) render(w, h int) *screen {
 	if a.st.encounter != nil && a.ui.view == viewMain {
 		drawEncounter(sc, a.st.encounter)
 	}
+	if a.ui.talkPick && a.ui.view == viewMain && a.st.encounter == nil {
+		drawTalk(sc, a.st.world, a.ui.talkSel)
+	}
+	if a.ui.help && a.ui.view == viewMain && a.st.encounter == nil {
+		drawHelp(sc)
+	}
 	drawToast(sc, &a.ui)
 	return sc
 }
@@ -340,8 +346,11 @@ func (a *app) drawExitsBox(sc *screen, x, y, w, h int) {
 		}
 		cost := fmt.Sprintf("%ds", ex.CostSec)
 		marker := "  "
-		if idx == sel {
+		switch {
+		case idx == sel:
 			marker = "▸ "
+		case !ex.OK:
+			marker = "× "
 		}
 		left := fmt.Sprintf("%s%s %s", marker, arrow, name)
 		selected := idx == a.ui.selectedExit && ex.OK && !traveling
@@ -463,7 +472,11 @@ func battleRound(b *battleView) int {
 }
 
 func (a *app) drawLogBox(sc *screen, x, y, w, h int) {
-	box(sc, x, y, w, h, "见闻", false)
+	title := "见闻"
+	if a.logBack > 0 {
+		title = fmt.Sprintf("见闻 · 上翻 %d 行（End 回底）", a.logBack)
+	}
+	box(sc, x, y, w, h, title, false)
 	ix, iw := boxInner(x, w)
 	rows := h - 2
 	if rows <= 0 || iw < 10 {
@@ -511,13 +524,16 @@ func (a *app) objective() (string, string) {
 			target = f.Name
 		}
 		return fmt.Sprintf("战斗 · 第 %d 回合", battleRound(b)),
-			fmt.Sprintf("目标 %s（a 普攻 · s 技能 · f 逃）", target)
+			fmt.Sprintf("目标 %s（a 普攻 · s 技能 · i 丹药 · f 逃）", target)
 	}
 	if p := a.st.player; p != nil && p.Travel != nil {
 		return "赶路中", fmt.Sprintf("前往 %s，还剩 %s", p.Travel.Name, fmtCountdown(p.Travel.ArriveAt-a.st.serverNow()))
 	}
 	if a.st.vitals.Cultivating {
 		return "打坐中", "真气在慢慢回，按 c 起身"
+	}
+	if m := a.st.world; m != nil && len(m.NPCs) > 0 {
+		return "此间有人", "t 与 " + m.NPCs[0].Name + " 说话"
 	}
 	if a.st.vitals.Stamina < 30 {
 		return "体力不济", "坐下调息，或回城歇脚"
@@ -536,15 +552,35 @@ func (a *app) drawHint(sc *screen, y int) {
 	if a.ui.typing {
 		st := style{fg: colBG, bg: colAccent, hasBG: true}
 		row(sc, 0, y, sc.w, st)
-		x := sc.put(1, y, chatChannelLabel(a.ui.chatCh)+" > ", st)
-		x = sc.put(x, y, a.ui.chatText, st)
+		tip := "Enter 送出  Tab 换频道  ↑↓ 历史  Esc 取消"
+		if a.ui.chatCh == "dm" {
+			if a.ui.chatTo == "" {
+				tip = "/w 道号 内容 指定对象  Esc 取消"
+			} else {
+				tip = "Enter 送出  /r 回复 " + a.ui.chatTo + "  Esc 取消"
+			}
+		}
+		if tw := textWidth(tip); tw > sc.w/2 {
+			tip = truncateWidth(tip, sc.w/2)
+		}
+		tw := textWidth(tip)
+		prompt := a.ui.chatPrompt()
+		x := sc.put(1, y, prompt, st)
+		room := sc.w - 2 - tw - 2 - textWidth(prompt)
+		x = sc.put(x, y, truncateWidth(a.ui.chatText, max(0, room)), st)
 		sc.put(x, y, "▌", st)
-		sc.put(x+2, y, "Enter 送出  Tab 换频道  Esc 取消", style{fg: colBG, bg: colPanel, hasBG: true})
+		sc.put(sc.w-tw-1, y, tip, style{fg: colBG, bg: colPanel, hasBG: true})
 		return
 	}
-	keys := "Space 历练   c 打坐   b 突破   l 四周   / 说话   PgUp 见闻   F1–F8 页面   o 退出登录   q 退出"
-	if a.st.battle != nil {
-		keys = "a 普攻   s 技能   f 逃   1–9 选目标   PgUp 战报"
+	keys := ""
+	switch {
+	case a.st.battle != nil:
+		keys = "a 普攻   s 技能   i 丹药   f 逃   ↑↓/1–9 选目标   PgUp 战报"
+	case sc.w >= 100:
+		keys = "Space 历练   c 打坐   b 突破   l 四周   / 说话   ? 帮助   F1–F8 页面   [ ] 翻页   q 退出"
+	default:
+		// 窄屏只留最常用的：宁可少写几个键，也不要"…"截断让人以为坏了。
+		keys = "Space 历练   c 打坐   b 突破   / 说话   ? 帮助   F1–F8 页面   q 退出"
 	}
 	sc.put(1, y, truncateWidth(keys, sc.w-2), fg(colFaint))
 }
@@ -575,16 +611,45 @@ func (a *app) drawPage(sc *screen) {
 		a.drawMap(sc, ix, top, iw, body)
 	case pageSettings:
 		a.drawSettings(sc, ix, top, iw, body)
-	case pageSocial, pageMarket:
-		name, desc, milestone := "江湖", "好友 · 师徒 · 道侣 · 仇敌 · 盟约 · 队伍", "M3"
-		if p == pageMarket {
-			name, desc, milestone = "坊市", "挂单 · 我的 · 成交 · 曲线 · 拍卖 · 书信", "M3"
-		}
-		sc.put(ix, top+1, name, fgBold(colGold))
-		sc.put(ix, top+2, desc, fg(colDim))
-		sc.put(ix, top+4, "此处在 "+milestone+" 开张", fg(colFaint))
+	case pageMarket:
+		a.drawMarket(sc, ix, top, iw, body)
+	case pageSocial:
+		sc.put(ix, top+1, "江湖", fgBold(colGold))
+		sc.put(ix, top+2, "好友 · 师徒 · 道侣 · 仇敌 · 盟约 · 队伍", fg(colDim))
+		sc.put(ix, top+4, "此处在 M3 开张；眼下可先在见闻里 / 说话。", fg(colFaint))
 	}
-	sc.put(1, sc.h-1, " Esc 返回    PgUp/PgDn 翻页", fg(colFaint))
+	if a.ui.typing {
+		a.drawHint(sc, sc.h-1)
+		return
+	}
+	sc.put(1, sc.h-1, truncateWidth(a.pageHint(), sc.w-2), fg(colFaint))
+}
+
+// pageHint 数据页底部的按键提示：每页只写这页真能用的键。
+func (a *app) pageHint() string {
+	switch a.ui.page {
+	case pageBag:
+		return "↑↓ 选择   Enter 使用/装备/卸下   s 出售   [ ] 翻页   Esc 返回"
+	case pageSkills:
+		return "↑↓ 选择   Enter 装配/卸下   [ ] 翻页   Esc 返回"
+	case pageMarket:
+		return "↑↓ 选择   +/- 数量   Enter 买入   [ ] 翻页   Esc 返回"
+	case pageMap:
+		return "Enter 刷新   l 看四周   [ ] 翻页   Esc 返回"
+	default:
+		return "/ 说话   [ ] 翻页   ? 帮助   Esc 返回"
+	}
+}
+
+// listWindow 计算列表可见窗口的起点：光标始终留在窗口内。
+func listWindow(sel, n, rows int) int {
+	if rows <= 0 {
+		return 0
+	}
+	if sel < rows {
+		return 0
+	}
+	return sel - rows + 1
 }
 
 func (a *app) drawCharacter(sc *screen, x, y, w, h int) {
@@ -682,18 +747,39 @@ func (a *app) drawBag(sc *screen, x, y, w, h int) {
 		sc.put(x, y+2, "行囊空空。", fg(colFaint))
 		return
 	}
+	rows := h - 2
+	if rows < 1 {
+		return
+	}
 	widths := []int{18, 6, 8, 6}
 	tableHeader(sc, x, y+1, []string{"名称", "数量", "类别", "售价"}, widths)
-	for i, it := range p.Bag {
-		ry := y + 2 + i
-		if ry >= y+h {
+
+	sel := clampInt(a.ui.selOf(pageBag), 0, len(p.Bag)-1)
+	start := listWindow(sel, len(p.Bag), rows)
+	for i := 0; i < rows; i++ {
+		idx := start + i
+		if idx >= len(p.Bag) {
 			break
+		}
+		it := p.Bag[idx]
+		// 无色的终端里没有反色可用，用 ▸ 标光标、· 标已装备。
+		name := it.Name
+		switch {
+		case idx == sel:
+			name = "▸ " + name
+		case it.Equipped:
+			name = "· " + name
 		}
 		st := fg(colText)
 		if it.Equipped {
 			st = fg(colAccent)
 		}
-		tableRow(sc, x, ry, []string{it.Name, itoa64(it.N), kindName(it.Kind), itoa64(it.Sell)}, widths, st)
+		ry := y + 2 + i
+		if idx == sel {
+			row(sc, x, ry, w, fgBg(colBG, colAccent))
+			st = fgBg(colBG, colAccent)
+		}
+		tableRow(sc, x, ry, []string{name, itoa64(it.N), kindName(it.Kind), itoa64(it.Sell)}, widths, st)
 	}
 }
 
@@ -706,25 +792,95 @@ func (a *app) drawSkills(sc *screen, x, y, w, h int) {
 	if p.MainName != "" {
 		main = p.MainName
 	}
-	sc.put(x, y, fmt.Sprintf("主修 %s   功法 %d 门   技能槽 %d", main, len(p.Manuals), len(p.Slots)), fg(colDim))
+	equipped := len(equippedSkillIDs(p))
+	sc.put(x, y, fmt.Sprintf("主修 %s   功法 %d 门   技能槽 %d/%d",
+		main, len(p.Manuals), equipped, skillSlotCap(p.Stage)), fg(colDim))
 	if len(p.SkillBook) == 0 {
 		sc.put(x, y+2, "还没学艺在身。", fg(colFaint))
 		return
 	}
+	rows := h - 2
+	if rows < 1 {
+		return
+	}
 	widths := []int{16, 6, 6, 8}
 	tableHeader(sc, x, y+1, []string{"技能", "真气", "威力", "状态"}, widths)
-	for i, s := range p.SkillBook {
-		ry := y + 2 + i
-		if ry >= y+h {
+
+	sel := clampInt(a.ui.selOf(pageSkills), 0, len(p.SkillBook)-1)
+	start := listWindow(sel, len(p.SkillBook), rows)
+	for i := 0; i < rows; i++ {
+		idx := start + i
+		if idx >= len(p.SkillBook) {
 			break
 		}
-		st := fg(colText)
+		sk := p.SkillBook[idx]
 		state := "未装配"
-		if s.Equipped {
+		st := fg(colText)
+		if sk.Equipped {
 			st, state = fg(colAccent), "已装配"
 		}
-		tableRow(sc, x, ry, []string{s.Name, itoa64(s.MP), fmt.Sprintf("%.1f", s.Power), state}, widths, st)
+		ry := y + 2 + i
+		if idx == sel {
+			row(sc, x, ry, w, fgBg(colBG, colAccent))
+			st = fgBg(colBG, colAccent)
+		}
+		name := sk.Name
+		if idx == sel {
+			name = "▸ " + name
+		}
+		tableRow(sc, x, ry, []string{name, itoa64(sk.MP), fmt.Sprintf("%.1f", sk.Power), state}, widths, st)
 	}
+}
+
+// drawMarket 坊市：服务端 ready.catalog.shop 就是货架，价格与门槛都按它来。
+func (a *app) drawMarket(sc *screen, x, y, w, h int) {
+	p := a.st.player
+	items := a.shopList()
+	if p != nil {
+		sc.put(x, y, fmt.Sprintf("灵石 %s   数量 %d（+/- 调整）", thousands(p.Stones), a.ui.shopQty), fg(colDim))
+	}
+	if len(items) == 0 {
+		sc.put(x, y+2, "货架是空的（服务端没下发 catalog）。", fg(colFaint))
+		return
+	}
+	rows := h - 3
+	if rows < 1 {
+		rows = 1
+	}
+	widths := []int{18, 8, 8, 6}
+	tableHeader(sc, x, y+1, []string{"货物", "类别", "价格", "需阶"}, widths)
+
+	sel := clampInt(a.ui.selOf(pageMarket), 0, len(items)-1)
+	start := listWindow(sel, len(items), rows)
+	for i := 0; i < rows; i++ {
+		idx := start + i
+		if idx >= len(items) {
+			break
+		}
+		it := items[idx]
+		st := fg(colText)
+		if p != nil && p.Stage < it.Min {
+			st = fg(colFaint)
+		}
+		ry := y + 2 + i
+		if idx == sel {
+			row(sc, x, ry, w, fgBg(colBG, colAccent))
+			st = fgBg(colBG, colAccent)
+		}
+		name := it.Name
+		if idx == sel {
+			name = "▸ " + name
+		}
+		tableRow(sc, x, ry, []string{
+			name, kindName(it.Kind), itoa64(it.Price), itoa64(int64(it.Min)),
+		}, widths, st)
+	}
+	it := items[sel]
+	desc := it.Desc
+	if desc == "" {
+		desc = "—"
+	}
+	sc.put(x, y+h-1, truncateWidth(fmt.Sprintf("%s：%s（卖价 %d）", it.Name, desc, it.Sell), w), fg(colFaint))
 }
 
 func (a *app) drawSect(sc *screen, x, y, w, h int) {
@@ -789,6 +945,103 @@ func drawEncounter(sc *screen, e *eventView) {
 	sc.put(ix, y+h-2, "按 1–"+itoa(len(e.Options))+" 选择", fg(colFaint))
 }
 
+// drawTalk 交谈弹层：列出当前节点的人物，↑↓ 选、数字直选。
+func drawTalk(sc *screen, m *mapView, sel int) {
+	if m == nil || len(m.NPCs) == 0 {
+		return
+	}
+	list := m.NPCs
+	h := len(list) + 5
+	w := 50
+	if w > sc.w-4 {
+		w = sc.w - 4
+	}
+	if h > sc.h-2 {
+		h = sc.h - 2
+	}
+	if w < 24 || h < 5 {
+		return
+	}
+	rowFill(sc, 0, 1, sc.w, sc.h-1)
+	x := (sc.w - w) / 2
+	y := (sc.h - h) / 2
+	if x < 1 {
+		x = 1
+	}
+	if y < 1 {
+		y = 1
+	}
+	box(sc, x, y, w, h, "交谈", true)
+	ix, iw := boxInner(x, w)
+	for i, n := range list {
+		ry := y + 1 + i
+		if ry >= y+h-2 {
+			break
+		}
+		line := fmt.Sprintf("%d  %s", i+1, n.Name)
+		if n.Title != "" {
+			line += " · " + n.Title
+		}
+		st := fg(colText)
+		if i == sel {
+			row(sc, ix, ry, iw, fgBg(colBG, colAccent))
+			st = fgBg(colBG, colAccent)
+		}
+		sc.put(ix, ry, truncateWidth(line, iw), st)
+	}
+	sc.put(ix, y+h-2, "↑↓ 选   Enter 说话   Esc 不说", fg(colFaint))
+}
+
+// drawHelp 帮助浮层：一屏看完所有键位，按 ? 或 Esc 收起。
+func drawHelp(sc *screen) {
+	lines := [][2]string{
+		{"行走", "↑↓ / j k 选路    Enter 前往    l 看四周"},
+		{"修行", "Space 历练    c 打坐    b 突破"},
+		{"交谈", "/ 说话    Tab 换频道    /w 道号 内容 私语    /r 内容 回复    t 与人物交谈"},
+		{"指令", "/任务  /排行  /学 功法  /加点 ti  /炼 丹药  /势力    （服务端文本指令）"},
+		{"界面", "F1–F8 数据页    [ ] 前后翻    PgUp/PgDn 见闻    End 回最新"},
+		{"背包", "↑↓ 选择    Enter 使用/装备    e 装备    s 出售"},
+		{"技能", "↑↓ 选择    Enter 装配/卸下"},
+		{"坊市", "↑↓ 选择    +/- 数量    Enter 买入"},
+		{"战斗", "↑↓ / 1–9 选目标    a 普攻    s 技能    i 丹药    f 逃"},
+		{"其他", "o 退出登录（按两次）    q 退出（按两次）    ? 收起帮助"},
+	}
+	w := 76
+	if w > sc.w-4 {
+		w = sc.w - 4
+	}
+	if w < 30 || sc.h < 8 {
+		return
+	}
+	h := len(lines) + 3
+	if h > sc.h-2 {
+		h = sc.h - 2
+	}
+	// 整屏铺底：帮助是"停下来看"的浮层，不该和底下的盒子边框交错。
+	rowFill(sc, 0, 1, sc.w, sc.h-1)
+	x := (sc.w - w) / 2
+	y := (sc.h - h) / 2
+	if x < 1 {
+		x = 1
+	}
+	if y < 1 {
+		y = 1
+	}
+	box(sc, x, y, w, h, "帮助", true)
+	ix, iw := boxInner(x, w)
+	for i, ln := range lines {
+		ry := y + 1 + i
+		if ry >= y+h-1 {
+			break
+		}
+		lx := sc.put(ix, ry, padWidth(ln[0], 6), fg(colGold))
+		sc.put(lx, ry, truncateWidth(ln[1], iw-6), fg(colText))
+	}
+	if y+h-2 > y+1 {
+		sc.put(ix, y+h-2, "? 或 Esc 收起", fg(colFaint))
+	}
+}
+
 // rowFill 用面板底色铺一块矩形，避免弹层底下透出内容。
 func rowFill(sc *screen, x, y, w, h int) {
 	st := style{fg: colText, bg: colBG, hasBG: true}
@@ -809,7 +1062,11 @@ func drawToast(sc *screen, ui *uiState) {
 		return
 	}
 	// 放在目标行右端：不压盒子边框，也不挡按键表。
+	// 数据页没有目标行，往上挪一行，否则会盖住整屏盒子的下边框。
 	y := sc.h - 2
+	if ui.view == viewMain && ui.page != pageGame {
+		y = sc.h - 3
+	}
 	if y < 1 {
 		y = 1
 	}

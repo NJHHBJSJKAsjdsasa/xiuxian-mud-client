@@ -261,6 +261,22 @@ type uiState struct {
 	target       int // 战斗中选中的敌方序号（1 起，对应 battle.foes[].i）
 	toasts       []toast
 	fatal        string
+
+	// 数据页列表光标：按页各存一份，来回翻页不会把选中的东西弄丢。
+	sel [pageSettings + 1]int
+	// 坊市一次买几件。
+	shopQty int
+	// 帮助浮层。
+	help bool
+	// 与人物交谈的弹层。
+	talkPick bool
+	talkSel  int
+	// 需要按两次才执行的动作（quit / logout）与第一次按下的时刻。
+	confirm   string
+	confirmAt int64
+	// 输入行的历史：↑ 翻旧、↓ 回新。
+	inputHist []string
+	inputAt   int
 }
 
 func newUIState(server string) uiState {
@@ -271,9 +287,64 @@ func newUIState(server string) uiState {
 			server: server,
 			focus:  1, // 服务器地址通常不用改，光标直接落在道号上
 		},
-		chatCh: "world",
-		target: 1,
+		chatCh:  "world",
+		target:  1,
+		shopQty: 1,
 	}
+}
+
+// selOf / setSel 读写某页的列表光标。
+func (u *uiState) selOf(p page) int {
+	if int(p) < 0 || int(p) >= len(u.sel) {
+		return 0
+	}
+	return u.sel[p]
+}
+
+func (u *uiState) setSel(p page, v int) {
+	if int(p) < 0 || int(p) >= len(u.sel) {
+		return
+	}
+	if v < 0 {
+		v = 0
+	}
+	u.sel[p] = v
+}
+
+// rememberInput 记一条输入历史：连续重复的不记，最多 20 条。
+func (u *uiState) rememberInput(text string) {
+	if text == "" {
+		return
+	}
+	if n := len(u.inputHist); n > 0 && u.inputHist[n-1] == text {
+		u.inputAt = n
+		return
+	}
+	u.inputHist = append(u.inputHist, text)
+	if len(u.inputHist) > 20 {
+		u.inputHist = u.inputHist[len(u.inputHist)-20:]
+	}
+	u.inputAt = len(u.inputHist)
+}
+
+// histStep 在输入历史里上/下翻：d=-1 更旧，d=+1 更新。翻到末尾就是空行。
+func (u *uiState) histStep(d int) {
+	if len(u.inputHist) == 0 {
+		return
+	}
+	i := u.inputAt + d
+	if i < 0 {
+		i = 0
+	}
+	if i > len(u.inputHist) {
+		i = len(u.inputHist)
+	}
+	u.inputAt = i
+	if i == len(u.inputHist) {
+		u.chatText = ""
+		return
+	}
+	u.chatText = u.inputHist[i]
 }
 
 func (u *uiState) toast(text string, bad bool) {
@@ -328,21 +399,35 @@ func chatChannelLabel(ch string) string {
 	}
 }
 
-// chatInputHint 输入行提示：`世界> 内容▌`。
-func (u *uiState) chatInputHint() string {
-	return " " + chatChannelLabel(u.chatCh) + "> " + u.chatText + "▌"
+// chatPrompt 输入行前缀：`世界> ` / `私语 @沈砚> `。
+func (u *uiState) chatPrompt() string {
+	if u.chatCh == "dm" {
+		to := u.chatTo
+		if to == "" {
+			to = "?"
+		}
+		return "私语 @" + to + "> "
+	}
+	return chatChannelLabel(u.chatCh) + "> "
 }
 
+// cycleChannel 轮到下一个频道。没指定私语对象时不进 dm——
+// 进去也只能发个空 to，服务端只会回 E-BADREQ。
 func (u *uiState) cycleChannel() {
-	switch u.chatCh {
-	case "world":
-		u.chatCh = "region"
-	case "region":
-		u.chatCh = "party"
-	case "party":
-		u.chatCh = "dm"
-	default:
-		u.chatCh = "world"
+	for i := 0; i < 4; i++ {
+		switch u.chatCh {
+		case "world":
+			u.chatCh = "region"
+		case "region":
+			u.chatCh = "party"
+		case "party":
+			u.chatCh = "dm"
+		default:
+			u.chatCh = "world"
+		}
+		if u.chatCh != "dm" || u.chatTo != "" {
+			return
+		}
 	}
 }
 

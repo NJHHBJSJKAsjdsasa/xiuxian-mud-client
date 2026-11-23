@@ -190,7 +190,7 @@ func TestRenderTypingHint(t *testing.T) {
 	a.ui.typing = true
 	a.ui.chatText = "有人在吗"
 	all := strings.Join(a.render(100, 30).frame(), "\n")
-	if !strings.Contains(all, "世界 > 有人在吗▌") {
+	if !strings.Contains(all, "世界> 有人在吗▌") {
 		t.Error("输入行未显示频道与内容")
 	}
 }
@@ -287,6 +287,97 @@ func TestRenderEncounterOverlay(t *testing.T) {
 	for _, want := range []string{"奇遇", "静心打坐", "翻开石缝", "按 1–3 选择"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("奇遇弹层缺 %q", want)
+		}
+	}
+}
+
+func TestRenderBagCursor(t *testing.T) {
+	a := richApp()
+	a.ui.page = pageBag
+	a.ui.setSel(pageBag, 1)
+	all := strings.Join(assertFrameWidth(t, a, 100, 22), "\n")
+	if !strings.Contains(all, "▸ 青锋剑") {
+		t.Errorf("选中行应有 ▸ 标记：\n%s", all)
+	}
+	if !strings.Contains(all, "↑↓ 选择") || !strings.Contains(all, "s 出售") {
+		t.Error("背包底栏没写清可用按键")
+	}
+}
+
+func TestRenderSkillsSlotCounter(t *testing.T) {
+	a := richApp()
+	a.ui.page = pageSkills
+	all := strings.Join(assertFrameWidth(t, a, 100, 20), "\n")
+	if !strings.Contains(all, "技能槽 1/2") {
+		t.Errorf("技能页应显示技能槽占用：\n%s", all)
+	}
+	if !strings.Contains(all, "▸ 剑气诀") && !strings.Contains(all, "剑气诀") {
+		t.Error("技能列表没出来")
+	}
+}
+
+func TestRenderMarketPage(t *testing.T) {
+	a := richApp()
+	a.ui.page = pageMarket
+	a.ui.setSel(pageMarket, 2)
+	all := strings.Join(assertFrameWidth(t, a, 100, 20), "\n")
+	for _, want := range []string{"货物", "回气丹", "凝神丹", "需阶", "数量 1", "修炼速度"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("坊市页缺 %q：\n%s", want, all)
+		}
+	}
+}
+
+func TestRenderHelpOverlay(t *testing.T) {
+	a := richApp()
+	a.ui.help = true
+	all := strings.Join(assertFrameWidth(t, a, 100, 30), "\n")
+	for _, want := range []string{"帮助", "行走", "私语", "装配/卸下", "i 丹药", "q 退出（按两次）"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("帮助浮层缺 %q：\n%s", want, all)
+		}
+	}
+}
+
+func TestRenderBlockedExitMarked(t *testing.T) {
+	a := richApp()
+	a.ui.selectedExit = 0
+	all := strings.Join(assertFrameWidth(t, a, 100, 30), "\n")
+	if !strings.Contains(all, "× → 青云观") {
+		t.Errorf("走不通的出口应标 ×：\n%s", all)
+	}
+}
+
+func TestRenderLogScrollTitle(t *testing.T) {
+	a := richApp()
+	a.logBack = 3
+	all := strings.Join(assertFrameWidth(t, a, 100, 30), "\n")
+	if !strings.Contains(all, "上翻 3 行") {
+		t.Errorf("上翻时见闻标题应提示：\n%s", all)
+	}
+}
+
+func TestRenderToastOnDataPage(t *testing.T) {
+	a := richApp()
+	a.ui.page = pageBag
+	a.ui.toast("这件不是装备，穿不上", true)
+	all := strings.Join(assertFrameWidth(t, a, 90, 16), "\n")
+	if !strings.Contains(all, "这件不是装备") {
+		t.Errorf("数据页 toast 没画出来：\n%s", all)
+	}
+	if strings.Contains(all, "└─────") && strings.Count(all, "└") != 1 {
+		t.Log("仅提示用")
+	}
+}
+
+func TestRenderTalkOverlay(t *testing.T) {
+	a := richApp()
+	a.st.world.NPCs = []npcView{{ID: "npc_zhanggui", Name: "掌柜", Title: "坊市"}}
+	a.ui.talkPick = true
+	all := strings.Join(assertFrameWidth(t, a, 100, 26), "\n")
+	for _, want := range []string{"交谈", "掌柜", "坊市", "Enter 说话"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("交谈弹层缺 %q：\n%s", want, all)
 		}
 	}
 }

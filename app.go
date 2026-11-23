@@ -1,6 +1,10 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+	"strings"
+)
 
 // 应用层：键盘 → 意图 → 网络命令；网络事件 → 状态 → 重绘。
 // 这一层不碰终端，也不解析协议细节，单测可以直接喂按键与事件。
@@ -167,8 +171,18 @@ func (a *app) handleEvent(ev netEvent) {
 	case evVital:
 		a.st.applyVital(e.v)
 	case evLogs:
-		a.st.pushLogs(e.lines)
-		a.logBack = 0
+		a.addLogs(e.lines)
+	case evChat:
+		line := fmt.Sprintf("[%s] %s%s：%s",
+			chatChannelLabel(e.c.Channel),
+			prefixIf(e.c.NPC, "【旁白】"),
+			e.c.From, e.c.Text)
+		a.addLogs([]logLine{{K: "chat", S: truncateChars(line, 512)}})
+		a.st.pushChat(e.c)
+		// 收到私语就把回复对象记下来，/r 才有地方去。
+		if e.c.Channel == "dm" && !e.c.NPC && e.c.From != "" {
+			a.ui.chatTo = e.c.From
+		}
 	case evMap:
 		oldLoc := ""
 		if a.st.world != nil {
@@ -187,14 +201,6 @@ func (a *app) handleEvent(ev netEvent) {
 				a.act(actMove, map[string]any{"to": e.m.Exits[i].To})
 			}
 		}
-	case evChat:
-		line := fmt.Sprintf("[%s] %s%s：%s",
-			chatChannelLabel(e.c.Channel),
-			prefixIf(e.c.NPC, "【旁白】"),
-			e.c.From, e.c.Text)
-		a.st.pushLogs([]logLine{{K: "chat", S: truncateChars(line, 512)}})
-		a.st.pushChat(e.c)
-		a.logBack = 0
 	case evPresence:
 		a.st.presence = e.n
 	case evErr:
@@ -210,20 +216,36 @@ func (a *app) handleEvent(ev netEvent) {
 			a.ui.login.err = e.msg
 		}
 	case evAnnounce:
-		a.st.pushLogs([]logLine{{K: "sys", S: "【公告】" + e.text}})
+		a.addLogs([]logLine{{K: "sys", S: "【公告】" + e.text}})
 	case evEvent:
 		a.st.encounter = e.e
+		// 奇遇是模态：帮助与交谈弹层让位，免得盖住选项。
+		a.ui.help = false
+		a.ui.talkPick = false
 	case evBattle:
 		a.st.battle = e.b
+		// 开打了就收起交谈/帮助，别让弹层盖住战况。
+		a.ui.talkPick = false
+		a.ui.help = false
 		if e.b.Over {
 			// 结算帧只带 id/over/won（没有敌方与我方），记一行结果后收掉战斗盒。
-			a.st.pushLogs([]logLine{{K: "lvl", S: battleResultText(e.b)}})
+			a.addLogs([]logLine{{K: "lvl", S: battleResultText(e.b)}})
 			a.st.battle = nil
 		}
 		if a.ui.target < 1 {
 			a.ui.target = 1
 		}
 	}
+}
+
+// addLogs 追加日志，并保住玩家的"上翻位置"：
+// 新到 N 行就让离底距离也多 N 行，屏幕上原本看的那几行不会动。
+// 贴底时（logBack=0）保持贴底，新行照常出现在最下面。
+func (a *app) addLogs(lines []logLine) {
+	if a.logBack > 0 {
+		a.logBack += len(lines)
+	}
+	a.st.pushLogs(lines)
 }
 
 func prefixIf(cond bool, s string) string {
@@ -245,7 +267,7 @@ func (a *app) onKey(k key) {
 	case viewCreate:
 		a.keyCreate(k)
 	case viewFatal:
-		if k.is("q") || k.is("esc") || k.is("enter") || k.isRune('q') {
+		if k.is("esc") || k.is("enter") || k.isRune('q') {
 			a.quit = true
 		}
 	case viewMain:
@@ -268,6 +290,8 @@ func (a *app) keyLogin(k key) {
 		a.submitLogin()
 	case k.is("backspace"):
 		a.ui.backspace()
+	case k.is("esc"):
+		a.quit = true
 	case k.kind == keyRune:
 		a.ui.appendRune(k.r)
 	}
@@ -293,6 +317,9 @@ func (a *app) submitLogin() {
 
 func (a *app) keyCreate(k key) {
 	switch {
+	case k.is("esc"):
+		// 建号页按 Esc 退回登录页：原本只能 Ctrl+C 整只客户端退出。
+		a.ui.view = viewLogin
 	case k.is("enter"):
 		name := a.ui.createName
 		n := len([]rune(name))
@@ -311,37 +338,44 @@ func (a *app) keyCreate(k key) {
 
 func (a *app) keyMain(k key) {
 	if a.ui.typing {
-		switch {
-		case k.is("enter"):
-			text := a.ui.chatText
-			if text != "" {
-				to := ""
-				if a.ui.chatCh == "dm" {
-					to = a.ui.chatTo
-				}
-				if a.online() {
-					a.send(netCmd{kind: cmdChat, ch: a.ui.chatCh, to: to, text: text})
-				}
-			}
-			a.ui.chatText = ""
-			a.ui.typing = false
-			a.logBack = 0
-		case k.is("esc"):
-			a.ui.chatText = ""
-			a.ui.typing = false
-		case k.is("tab"):
-			a.ui.cycleChannel()
-		case k.is("backspace"):
-			a.ui.backspace()
-		case k.kind == keyRune:
-			a.ui.appendRune(k.r)
+		a.keyChat(k)
+		return
+	}
+	// 奇遇是模态：只认数字键，别让别的操作把它顶掉。
+	if e := a.st.encounter; e != nil && a.ui.page == pageGame {
+		a.keyEncounter(k, e)
+		return
+	}
+	if a.ui.talkPick && a.ui.page == pageGame {
+		a.keyTalk(k)
+		return
+	}
+
+	// 帮助浮层是全局的：? 开关，Esc / Enter 也能收起。
+	if k.isRune('?') {
+		a.ui.help = !a.ui.help
+		a.ui.confirm = ""
+		return
+	}
+	if a.ui.help {
+		if k.is("esc") || k.is("enter") || k.isRune('q') {
+			a.ui.help = false
 		}
 		return
 	}
 
-	if e := a.st.encounter; e != nil && a.ui.page == pageGame {
-		a.keyEncounter(k, e)
+	// 退出与退出登录都要按两次：误碰一个键不该把这一局断掉。
+	if k.isRune('q') {
+		a.confirmTwice("quit", "再按一次 q 退出", func() { a.quit = true })
 		return
+	}
+	// 按了别的键就撤销待确认（q 已在上面返回）。判据要按键分：
+	// 一律清空的话，第二次 o 会先把自己刚立的确认抹掉，永远退不出去。
+	if a.ui.confirm == "quit" {
+		a.ui.confirm = ""
+	}
+	if a.ui.confirm == "logout" && !k.isRune('o') {
+		a.ui.confirm = ""
 	}
 
 	if b := a.st.battle; b != nil && a.ui.page == pageGame {
@@ -355,33 +389,27 @@ func (a *app) keyMain(k key) {
 			return
 		}
 	}
+	switch {
+	case k.isRune(']'):
+		a.cyclePage(1)
+		return
+	case k.isRune('['):
+		a.cyclePage(-1)
+		return
+	}
 
-	// 数据页只认"返回 / 退出 / 说话 / 翻见闻"，不要让 ↑↓ Enter 去改主界面的选中项。
 	if a.ui.page != pageGame {
-		switch {
-		case k.is("esc"):
+		if k.is("esc") {
 			a.ui.page = pageGame
-		case k.isRune('q'):
-			a.quit = true
-		case k.isRune('/'):
-			a.ui.typing = true
-			a.ui.chatText = ""
-		case k.is("pgup"), k.is("pgdn"), k.is("home"), k.is("end"):
-			a.scrollLogs(k)
+			return
 		}
+		a.keyPage(k)
 		return
 	}
 
 	switch {
-	case k.is("esc"):
-		if a.ui.page != pageGame {
-			a.ui.page = pageGame
-		}
-	case k.isRune('q'):
-		a.quit = true
 	case k.isRune('/'):
-		a.ui.typing = true
-		a.ui.chatText = ""
+		a.startChat()
 	case k.is("space"):
 		a.explore()
 	case k.isRune('c'):
@@ -390,26 +418,668 @@ func (a *app) keyMain(k key) {
 		a.intentBreakthrough()
 	case k.isRune('l'):
 		a.intentLook()
+	case k.isRune('t'):
+		a.openTalk()
 	case k.isRune('o'):
-		a.intentLogout()
+		a.confirmTwice("logout", "再按一次 o 退出登录", a.intentLogout)
 	case k.is("up"), k.isRune('k'):
-		if n := a.exitCount(); n > 0 {
-			a.ui.selectedExit = (a.ui.selectedExit + n - 1) % n
-		}
+		a.moveExit(-1)
 	case k.is("down"), k.isRune('j'):
-		if n := a.exitCount(); n > 0 {
-			a.ui.selectedExit = (a.ui.selectedExit + 1) % n
-		}
+		a.moveExit(1)
 	case k.is("enter"):
-		if m := a.st.world; m != nil && a.ui.selectedExit < len(m.Exits) {
-			ex := m.Exits[a.ui.selectedExit]
-			if ex.OK && a.online() {
-				a.act(actMove, map[string]any{"to": ex.To})
-			}
-		}
+		a.enterExit()
 	case k.is("pgup"), k.is("pgdn"), k.is("home"), k.is("end"):
 		a.scrollLogs(k)
 	}
+}
+
+// openTalk 打开"与人物交谈"的弹层。节点上没人就直说，不弹空框。
+func (a *app) openTalk() {
+	if a.st.player != nil && a.st.player.Travel != nil {
+		a.ui.toast("正在赶路，到了再聊", true)
+		return
+	}
+	if len(a.npcList()) == 0 {
+		a.ui.toast("此间没有别人", true)
+		return
+	}
+	a.ui.talkPick = true
+	a.ui.talkSel = 0
+}
+
+func (a *app) npcList() []npcView {
+	if a.st.world == nil {
+		return nil
+	}
+	return a.st.world.NPCs
+}
+
+// keyTalk 交谈弹层：↑↓ 选、Enter 或数字确认、Esc 取消。
+func (a *app) keyTalk(k key) {
+	list := a.npcList()
+	switch {
+	case k.is("esc"):
+		a.ui.talkPick = false
+	case k.is("up"), k.isRune('k'):
+		if n := len(list); n > 0 {
+			a.ui.talkSel = (a.ui.talkSel + n - 1) % n
+		}
+	case k.is("down"), k.isRune('j'):
+		if n := len(list); n > 0 {
+			a.ui.talkSel = (a.ui.talkSel + 1) % n
+		}
+	case k.is("enter"):
+		a.talkTo(a.ui.talkSel)
+	case k.kind == keyRune && digitOf(k.r) > 0:
+		a.talkTo(digitOf(k.r) - 1)
+	}
+}
+
+func (a *app) talkTo(i int) {
+	list := a.npcList()
+	if i < 0 || i >= len(list) {
+		return
+	}
+	npc := list[i]
+	a.ui.talkPick = false
+	if !a.online() {
+		return
+	}
+	a.act(actTalk, map[string]any{"npc": npc.ID})
+}
+
+// confirmTwice 两段确认：第一次只提示，2.5 秒内再按一次才执行。
+func (a *app) confirmTwice(kind, hint string, do func()) {
+	if a.ui.confirm == kind && nowMs()-a.ui.confirmAt < 2500 {
+		a.ui.confirm = ""
+		do()
+		return
+	}
+	a.ui.confirm, a.ui.confirmAt = kind, nowMs()
+	a.ui.toast(hint, false)
+}
+
+// keyChat 输入行：Enter 送出、Tab 换频道、↑↓ 翻历史、Esc 取消。
+func (a *app) keyChat(k key) {
+	switch {
+	case k.is("enter"):
+		a.sendChatInput()
+	case k.is("esc"):
+		a.ui.chatText = ""
+		a.ui.typing = false
+	case k.is("tab"):
+		a.ui.cycleChannel()
+	case k.is("up"):
+		a.ui.histStep(-1)
+	case k.is("down"):
+		a.ui.histStep(1)
+	case k.is("space"):
+		// 空格在 parseKeys 里是特殊键，不处理就等于"聊天打不出空格"，
+		// `mail list`、`排行 修为` 这类带参数的指令全都发不出去。
+		a.ui.appendRune(' ')
+	case k.is("backspace"):
+		a.ui.backspace()
+	case k.kind == keyRune:
+		a.ui.appendRune(k.r)
+	}
+}
+
+func (a *app) startChat() {
+	a.ui.typing = true
+	a.ui.chatText = ""
+	a.ui.inputAt = len(a.ui.inputHist)
+}
+
+// sendChatInput 解析输入行：普通发言、/w 私语、@道号 私语、/r 回复、/help 帮助。
+// 认不出的 / 开头只提示，不当成普通发言发出去——免得把命令喊给全服看。
+func (a *app) sendChatInput() {
+	raw := strings.TrimSpace(a.ui.chatText)
+	a.ui.chatText = ""
+	a.ui.typing = false
+	if raw == "" {
+		return
+	}
+	// 中文输入法常把斜杠与 at 打成全角，这里统一半角。
+	raw = strings.NewReplacer("／", "/", "＠", "@").Replace(raw)
+
+	switch {
+	case strings.HasPrefix(raw, "//"):
+		// 双斜杠强制当普通发言：想喊一句"任务"又不触发指令时用。
+		a.sendChannel(raw[2:])
+		return
+	case raw == "/help", raw == "/?":
+		a.ui.help = true
+		return
+	case strings.HasPrefix(raw, "/w "), strings.HasPrefix(raw, "/W "):
+		name, text := splitFirst(strings.TrimSpace(raw[3:]))
+		if name == "" || text == "" {
+			a.ui.toast("用法：/w 道号 内容", true)
+			return
+		}
+		a.sendWhisper(name, text)
+		return
+	case strings.HasPrefix(raw, "@"):
+		name, text := splitFirst(strings.TrimSpace(raw[1:]))
+		if name == "" || text == "" {
+			a.ui.toast("用法：@道号 内容", true)
+			return
+		}
+		a.sendWhisper(name, text)
+		return
+	case strings.HasPrefix(raw, "/r "):
+		text := strings.TrimSpace(raw[3:])
+		if a.ui.chatTo == "" {
+			a.ui.toast("还没有私语对象，先 /w 道号 内容", true)
+			return
+		}
+		if text == "" {
+			a.ui.toast("用法：/r 内容", true)
+			return
+		}
+		a.sendWhisper(a.ui.chatTo, text)
+		return
+	case strings.HasPrefix(raw, "/"):
+		// 其余斜杠命令交给服务端的文本指令通道（/任务、/排行 修为、/学 功法…）。
+		// 客户端不另抄一份动作映射，服务端改了也不会两边对不上。
+		a.sendCmdText(strings.TrimSpace(raw[1:]))
+		return
+	}
+
+	// 命令动词开头（任务、排行 修为、学 太玄剑典…）也走文本指令：
+	// MUD 的习惯就是直接敲，不必先加斜杠。
+	if isServerVerb(raw) {
+		a.sendCmdText(raw)
+		return
+	}
+
+	a.sendChannel(raw)
+}
+
+// sendChannel 普通发言：发到当前频道（私语需要先有对象）。
+func (a *app) sendChannel(text string) {
+	if text == "" {
+		return
+	}
+	a.ui.rememberInput(text)
+	if a.ui.chatCh == "dm" && a.ui.chatTo == "" {
+		a.ui.toast("私语要先指定对象：/w 道号 内容", true)
+		return
+	}
+	if !a.online() {
+		return
+	}
+	to := ""
+	if a.ui.chatCh == "dm" {
+		to = a.ui.chatTo
+	}
+	a.send(netCmd{kind: cmdChat, ch: a.ui.chatCh, to: to, text: text})
+}
+
+// sendCmdText 走服务端的 t=cmd 文本指令通道。参数校验、冷却与错误码都在服务端，
+// 客户端只把整句送过去——这样 30 多条指令不必在客户端再实现一遍。
+func (a *app) sendCmdText(text string) {
+	if text == "" {
+		return
+	}
+	a.ui.rememberInput("/" + text)
+	if !a.online() {
+		return
+	}
+	a.send(netCmd{kind: cmdText, text: text})
+}
+
+// serverVerbs 与服务端 internal/game/cmd.go 的动词表一致（12-API §5.3 由它生成）。
+// 只用来判断"这句话像不像指令"，猜错最多多一条服务端的提示，不会丢消息。
+var serverVerbs = map[string]bool{
+	"势力": true, "门派": true, "faction": true,
+	"加入": true, "入伙": true,
+	"捐献": true, "捐赠": true, "兑换": true,
+	"退出势力": true, "退出宗门": true,
+	"帮助": true, "help": true, "?": true,
+	"状态": true, "面板": true,
+	"打坐": true, "修炼": true, "停": true, "收功": true, "停止": true,
+	"历练": true, "探索": true, "突破": true, "冲阶": true,
+	"用": true, "服": true, "吃": true,
+	"装备": true, "卸下": true, "买": true, "卖": true,
+	"炼": true, "炼丹": true,
+	"学": true, "参悟": true, "主修": true, "加点": true,
+	"聊天": true, "说": true,
+	"排行": true, "榜": true, "任务": true,
+	"切磋": true, "生死斗": true, "接受": true, "应战": true, "拒绝": true,
+	"挂": true, "挂单": true, "摊": true, "逛": true, "集市": true,
+	"买摊": true, "撤摊": true, "选": true,
+	"mail": true, "邮件": true,
+}
+
+// isServerVerb 看首个词是不是服务端指令动词。
+func isServerVerb(text string) bool {
+	fields := strings.Fields(text)
+	if len(fields) == 0 {
+		return false
+	}
+	return serverVerbs[fields[0]]
+}
+
+func (a *app) sendWhisper(name, text string) {
+	a.ui.rememberInput("/w " + name + " " + text)
+	a.ui.chatTo = name
+	a.ui.chatCh = "dm"
+	if !a.online() {
+		return
+	}
+	a.send(netCmd{kind: cmdChat, ch: "dm", to: name, text: text})
+}
+
+// splitFirst 按第一段空白切开：`沈砚 在吗` → (`沈砚`, `在吗`)。
+// 全角空格也当分隔符，中文输入法下常打出来。
+func splitFirst(s string) (string, string) {
+	for i, r := range s {
+		if r == ' ' || r == '\t' || r == '\u3000' {
+			return s[:i], strings.TrimSpace(s[i:])
+		}
+	}
+	return s, ""
+}
+
+// keyPage 数据页按键：列表光标、使用/装备/装配/买入、刷新舆图。
+func (a *app) keyPage(k key) {
+	if k.isRune('/') {
+		a.startChat()
+		return
+	}
+	switch a.ui.page {
+	case pageBag:
+		if a.navList(k, len(a.bagItems())) {
+			return
+		}
+		switch {
+		case k.is("enter"), k.is("space"), k.isRune('u'):
+			a.useSelectedBag(false)
+		case k.isRune('e'):
+			a.useSelectedBag(true)
+		case k.isRune('s'), k.isRune('x'):
+			a.sellSelectedBag()
+		}
+	case pageSkills:
+		if a.navList(k, len(a.skillList())) {
+			return
+		}
+		if k.is("enter") || k.is("space") || k.isRune('e') {
+			a.toggleSelectedSkill()
+		}
+	case pageMarket:
+		if a.navList(k, len(a.shopList())) {
+			return
+		}
+		switch {
+		case k.isRune('+'), k.isRune('='), k.is("right"):
+			a.bumpQty(1)
+		case k.isRune('-'), k.isRune('_'), k.is("left"):
+			a.bumpQty(-1)
+		case k.is("enter"), k.isRune('b'):
+			a.buySelected()
+		}
+	case pageMap:
+		switch {
+		case k.is("enter"):
+			if a.online() {
+				a.act(actWorldMap, map[string]any{})
+			}
+		case k.isRune('l'):
+			a.intentLook()
+		}
+	}
+}
+
+// navList 处理列表通用移动键；认识这个键并处理了返回 true。
+func (a *app) navList(k key, n int) bool {
+	if n <= 0 {
+		return false
+	}
+	p := a.ui.page
+	sel := a.ui.selOf(p)
+	switch {
+	case k.is("up"), k.isRune('k'):
+		sel--
+	case k.is("down"), k.isRune('j'):
+		sel++
+	case k.is("pgup"):
+		sel -= 10
+	case k.is("pgdn"):
+		sel += 10
+	case k.is("home"):
+		sel = 0
+	case k.is("end"):
+		sel = n - 1
+	default:
+		return false
+	}
+	a.ui.setSel(p, clampInt(sel, 0, n-1))
+	return true
+}
+
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+// ---------- 背包 ----------
+
+func (a *app) bagItems() []bagItem {
+	if a.st.player == nil {
+		return nil
+	}
+	return a.st.player.Bag
+}
+
+func (a *app) bagSel() (bagItem, bool) {
+	items := a.bagItems()
+	i := a.ui.selOf(pageBag)
+	if i < 0 || i >= len(items) {
+		return bagItem{}, false
+	}
+	return items[i], true
+}
+
+// useSelectedBag 对选中物品动手：已装备的卸下，装备类穿上，其余按"用"处理。
+// forceEquip 对应 e 键——明确要穿，不像 Enter 那样猜。
+func (a *app) useSelectedBag(forceEquip bool) {
+	it, ok := a.bagSel()
+	if !ok {
+		return
+	}
+	if !a.online() {
+		return
+	}
+	if it.Equipped && it.Slot != "" {
+		// 已装备的再按 Enter 就是卸下：不然"s 出售"提示"先卸下"却没有卸下的键。
+		// e 键是"明确要穿"，对着已穿的东西就只提示，不该反过来脱掉。
+		if forceEquip {
+			a.ui.toast("这件已经穿着了；要脱按 Enter", false)
+			return
+		}
+		a.act(actUnequip, map[string]any{"slot": it.Slot})
+		return
+	}
+	if isEquipKind(it.Kind) {
+		a.act(actEquip, map[string]any{"item": it.ID})
+		return
+	}
+	if forceEquip {
+		a.ui.toast("这件不是装备，穿不上", true)
+		return
+	}
+	a.act(actUse, map[string]any{"item": it.ID, "n": 1})
+}
+
+// sellSelectedBag 卖一件。已装备的卖不掉（服务端会拒），这里先拦一下。
+func (a *app) sellSelectedBag() {
+	it, ok := a.bagSel()
+	if !ok {
+		return
+	}
+	if it.Equipped {
+		a.ui.toast("先卸下再卖（选中后按 Enter）", true)
+		return
+	}
+	if it.Sell <= 0 {
+		a.ui.toast("这件卖不出手", true)
+		return
+	}
+	if !a.online() {
+		return
+	}
+	a.act(actSell, map[string]any{"item": it.ID, "n": 1})
+}
+
+func isEquipKind(kind string) bool {
+	switch kind {
+	case "weapon", "armor", "boots", "accessory":
+		return true
+	}
+	return false
+}
+
+// ---------- 技能 ----------
+
+func (a *app) skillList() []skillItem {
+	if a.st.player == nil {
+		return nil
+	}
+	return a.st.player.SkillBook
+}
+
+// skillSlotCap 与 content.SlotCount（N-SKL-02）同规则：阶 0/5/10/13 各解锁一槽。
+// 只用于界面提示，能不能装以服务端 setSkills 的判定为准。
+func skillSlotCap(stage int) int {
+	switch {
+	case stage >= 13:
+		return 4
+	case stage >= 10:
+		return 3
+	case stage >= 5:
+		return 2
+	default:
+		return 1
+	}
+}
+
+// equippedSkillIDs 取已装配技能，按槽位顺序。优先用 state.slots，
+// 老服务端没下发时退回 skillBook 的 equipped/slot 字段。
+func equippedSkillIDs(p *playerView) []string {
+	if p == nil {
+		return nil
+	}
+	if len(p.Slots) > 0 {
+		return append([]string(nil), p.Slots...)
+	}
+	type pair struct {
+		slot int
+		id   string
+	}
+	var ps []pair
+	for _, s := range p.SkillBook {
+		if s.Equipped {
+			ps = append(ps, pair{s.Slot, s.ID})
+		}
+	}
+	sort.Slice(ps, func(i, j int) bool { return ps[i].slot < ps[j].slot })
+	out := make([]string, 0, len(ps))
+	for _, x := range ps {
+		out = append(out, x.id)
+	}
+	return out
+}
+
+// toggleSelectedSkill 装配 / 卸下选中技能：setSkills 要的是完整名单。
+func (a *app) toggleSelectedSkill() {
+	p := a.st.player
+	list := a.skillList()
+	i := a.ui.selOf(pageSkills)
+	if p == nil || i < 0 || i >= len(list) {
+		return
+	}
+	it := list[i]
+	ids := equippedSkillIDs(p)
+	next := make([]string, 0, len(ids)+1)
+	for _, id := range ids {
+		if id != it.ID {
+			next = append(next, id)
+		}
+	}
+	if len(next) == len(ids) {
+		// 原来没装：加进去，先看槽够不够。
+		if limit := skillSlotCap(p.Stage); len(ids) >= limit {
+			a.ui.toast(fmt.Sprintf("技能槽已满（%d 个），先卸下一个", limit), true)
+			return
+		}
+		next = append(next, it.ID)
+	}
+	if !a.online() {
+		return
+	}
+	a.act(actSetSkills, map[string]any{"ids": next})
+}
+
+// ---------- 坊市 ----------
+
+func (a *app) shopList() []shopItem {
+	if a.st.catalog == nil {
+		return nil
+	}
+	return a.st.catalog.Shop
+}
+
+func (a *app) bumpQty(d int) {
+	q := a.ui.shopQty + d
+	if q < 1 {
+		q = 1
+	}
+	if q > 99 {
+		q = 99
+	}
+	a.ui.shopQty = q
+}
+
+func (a *app) buySelected() {
+	items := a.shopList()
+	i := a.ui.selOf(pageMarket)
+	if i < 0 || i >= len(items) {
+		return
+	}
+	it := items[i]
+	p := a.st.player
+	qty := a.ui.shopQty
+	if p == nil {
+		return
+	}
+	if p.Stage < it.Min {
+		a.ui.toast(fmt.Sprintf("%s 要 %d 阶才买得到", it.Name, it.Min), true)
+		return
+	}
+	if cost := it.Price * int64(qty); cost > p.Stones {
+		a.ui.toast(fmt.Sprintf("灵石不够：要 %s，身上 %s", thousands(cost), thousands(p.Stones)), true)
+		return
+	}
+	if !a.online() {
+		return
+	}
+	a.act(actBuy, map[string]any{"item": it.ID, "n": qty})
+}
+
+// ---------- 页与去处 ----------
+
+var pageOrder = []page{
+	pageCharacter, pageBag, pageSkills, pageSocial,
+	pageMarket, pageSect, pageMap, pageSettings,
+}
+
+// cyclePage 前后翻数据页；在主界面按 ] 进第一页、[ 进最后一页。
+func (a *app) cyclePage(dir int) {
+	cur := -1
+	for i, p := range pageOrder {
+		if p == a.ui.page {
+			cur = i
+		}
+	}
+	n := len(pageOrder)
+	if cur < 0 {
+		if dir > 0 {
+			a.ui.page = pageOrder[0]
+		} else {
+			a.ui.page = pageOrder[n-1]
+		}
+		return
+	}
+	a.ui.page = pageOrder[(cur+dir+n)%n]
+}
+
+func (a *app) moveExit(d int) {
+	n := a.exitCount()
+	if n == 0 {
+		return
+	}
+	a.ui.selectedExit = (a.ui.selectedExit + d + n) % n
+}
+
+// enterExit 前往选中出口。走不了要说清楚为什么——
+// 之前按 Enter 没反应，玩家只会以为客户端卡了。
+func (a *app) enterExit() {
+	if a.st.player != nil && a.st.player.Travel != nil {
+		a.ui.toast("正在赶路，到了再说", true)
+		return
+	}
+	m := a.st.world
+	if m == nil || len(m.Exits) == 0 {
+		a.ui.toast("这里没有路可走", true)
+		return
+	}
+	sel := a.ui.selectedExit
+	if sel < 0 || sel >= len(m.Exits) {
+		sel = 0
+	}
+	ex := m.Exits[sel]
+	if !ex.OK {
+		a.ui.toast(exitReason(ex), true)
+		return
+	}
+	if !a.online() {
+		a.ui.toast("还没连上，先等等", true)
+		return
+	}
+	a.act(actMove, map[string]any{"to": ex.To})
+}
+
+// exitReason 把服务端出口字段翻成人话。cond 是代码（fly / water / blocked:<id>），
+// 直接印出来玩家看不懂。
+func exitReason(ex exitView) string {
+	if ex.Blocked != nil && *ex.Blocked {
+		if ex.Until != nil && *ex.Until > nowMs() {
+			return "这条路封着，还要 " + fmtCountdown(*ex.Until-nowMs())
+		}
+		return "这条路封着"
+	}
+	if ex.Cond != nil {
+		c := *ex.Cond
+		switch {
+		case strings.HasPrefix(c, "blocked:"):
+			return "这条路封着"
+		case c == "fly":
+			return "要会御空才过得去"
+		case c == "water":
+			return "要会泅水才过得去"
+		case c == "owner":
+			return "要此地主人才能过"
+		case strings.HasPrefix(c, "realm:"):
+			return "要 " + strings.TrimPrefix(c, "realm:") + " 阶才过得去"
+		case strings.HasPrefix(c, "item:"):
+			return "身上要有指定的物件"
+		case strings.HasPrefix(c, "token:"):
+			return "要有对应的信物"
+		case strings.HasPrefix(c, "manual:"):
+			return "要学过对应的功法"
+		case strings.HasPrefix(c, "time:"):
+			return "这条路过时辰才开"
+		case c != "":
+			return "过不去（" + c + "）"
+		}
+	}
+	if ex.Fee != nil && *ex.Fee > 0 {
+		return fmt.Sprintf("要交 %d 灵石才放行", *ex.Fee)
+	}
+	return "此路不通"
+}
+
+func (a *app) exitCount() int {
+	if a.st.world == nil {
+		return 0
+	}
+	return len(a.st.world.Exits)
 }
 
 // scrollLogs 翻见闻：PgUp 往上（看更早），PgDn 回最新，Home 跳到最早，End 回底。
@@ -428,13 +1098,6 @@ func (a *app) scrollLogs(k key) {
 	case k.is("end"):
 		a.logBack = 0
 	}
-}
-
-func (a *app) exitCount() int {
-	if a.st.world == nil {
-		return 0
-	}
-	return len(a.st.world.Exits)
 }
 
 func (a *app) explore() {
@@ -473,6 +1136,8 @@ func (a *app) intentLogout() {
 	a.ui.login.loading = false
 	a.ui.page = pageGame
 	a.ui.typing = false
+	a.ui.help = false
+	a.ui.chatTo = ""
 }
 
 // tick 处理与时间有关的事：舆图补拉、登录超时、toast 过期、待办登录。
@@ -514,31 +1179,96 @@ func (a *app) shutdown() {
 	a.send(netCmd{kind: cmdShutdown})
 }
 
-// keyBattle 战斗中的按键：a 普攻、s 技能、f 逃、1–9 选目标。
+// keyBattle 战斗中的按键：a 普攻、s 技能、i 丹药、f 逃、↑↓/1–9 选目标。
 func (a *app) keyBattle(k key, b *battleView) {
 	switch {
 	case k.is("pgup"), k.is("pgdn"), k.is("home"), k.is("end"):
 		a.scrollLogs(k)
-	case k.kind == keyRune && k.r >= '1' && k.r <= '9':
-		n := int(k.r - '0')
+	case k.is("up"), k.isRune('k'):
+		a.cycleFoe(-1)
+	case k.is("down"), k.isRune('j'):
+		a.cycleFoe(1)
+	case k.kind == keyRune && digitOf(k.r) > 0:
+		n := digitOf(k.r)
 		if a.foeByIndex(n) != nil {
 			a.ui.target = n
 		}
 	case k.isRune('a'), k.is("space"), k.is("enter"):
-		a.act(actBattle, map[string]any{"op": "attack", "target": a.ui.target})
+		a.battleAct(b, map[string]any{"op": "attack", "target": a.ui.target})
 	case k.isRune('s'):
 		if id := a.firstSkill(); id != "" {
-			a.act(actBattle, map[string]any{"op": "skill", "id": id, "target": a.ui.target})
+			a.battleAct(b, map[string]any{"op": "skill", "id": id, "target": a.ui.target})
 		} else {
 			a.ui.toast("还没装配技能，先按 a 普攻", true)
 		}
-	case k.isRune('f'), k.is("esc"):
+	case k.isRune('i'):
+		if it, ok := a.healPill(); ok {
+			a.battleAct(b, map[string]any{"op": "item", "id": it.ID})
+		} else {
+			a.ui.toast("行囊里没有丹药", true)
+		}
+	case k.isRune('f'):
 		if b.CanFlee {
 			a.act(actBattle, map[string]any{"op": "flee"})
 		} else {
 			a.ui.toast("这一战逃不掉", true)
 		}
+	case k.is("esc"):
+		// Esc 不替你逃：打 Boss 时手滑一次就白打一场。
+		a.ui.toast("逃跑按 f；Esc 不替你逃", false)
 	}
+}
+
+// battleAct 轮到自己才发动作；否则只提示，免得白吃一条 E-BUSY。
+func (a *app) battleAct(b *battleView, data map[string]any) {
+	if b.State != "" && b.State != "player" {
+		a.ui.toast("等对方出手…", false)
+		return
+	}
+	a.act(actBattle, data)
+}
+
+// cycleFoe 在活着的敌人之间前后切换；全倒了就退化成全体，至少能选。
+func (a *app) cycleFoe(d int) {
+	b := a.st.battle
+	if b == nil {
+		return
+	}
+	list := b.Foes
+	if len(list) == 0 && b.Enemy != nil {
+		list = []foeView{*b.Enemy}
+	}
+	if len(list) == 0 {
+		return
+	}
+	idxOf := func(i int) int {
+		if list[i].I == 0 {
+			return i + 1
+		}
+		return list[i].I
+	}
+	var ids []int
+	for i := range list {
+		if !list[i].Dead {
+			ids = append(ids, idxOf(i))
+		}
+	}
+	if len(ids) == 0 {
+		for i := range list {
+			ids = append(ids, idxOf(i))
+		}
+	}
+	pos := -1
+	for i, n := range ids {
+		if n == a.ui.target {
+			pos = i
+		}
+	}
+	if pos < 0 {
+		a.ui.target = ids[0]
+		return
+	}
+	a.ui.target = ids[(pos+d+len(ids))%len(ids)]
 }
 
 // foeByIndex 按 battle.foes[].i 找敌方；找不到返回 nil。
@@ -572,6 +1302,30 @@ func (a *app) firstSkill() string {
 	return ""
 }
 
+// healPill 找一颗回复类丹药。货架说明里带"气血/真气"的优先——
+// 凝神丹、破境丹这类在战斗里吃了纯属浪费；找不到再用第一颗丹药兜底。
+func (a *app) healPill() (bagItem, bool) {
+	desc := map[string]string{}
+	for _, s := range a.shopList() {
+		desc[s.ID] = s.Desc
+	}
+	var fallback bagItem
+	hasFallback := false
+	for _, it := range a.bagItems() {
+		if it.Kind != "pill" && it.Kind != "dan" {
+			continue
+		}
+		d := desc[it.ID]
+		if strings.Contains(d, "气血") || strings.Contains(d, "真气") {
+			return it, true
+		}
+		if !hasFallback {
+			fallback, hasFallback = it, true
+		}
+	}
+	return fallback, hasFallback
+}
+
 func battleResultText(b *battleView) string {
 	switch {
 	case b.Won:
@@ -587,10 +1341,10 @@ func battleResultText(b *battleView) string {
 
 // keyEncounter 奇遇三选一：只认数字键，选完立刻收起弹层（服务端还会回 state）。
 func (a *app) keyEncounter(k key, e *eventView) {
-	if k.kind != keyRune || k.r < '1' || k.r > '9' {
+	if k.kind != keyRune || digitOf(k.r) == 0 {
 		return
 	}
-	i := int(k.r-'0') - 1
+	i := digitOf(k.r) - 1
 	if i >= len(e.Options) {
 		return
 	}
@@ -603,7 +1357,7 @@ func (a *app) tickAutoExplore() {
 	if a.exploreLeft <= 0 || !a.online() || a.st.player == nil {
 		return
 	}
-	if a.st.battle != nil || a.st.encounter != nil {
+	if a.st.battle != nil || a.st.encounter != nil || a.ui.talkPick || a.ui.help {
 		return
 	}
 	if nowMs()-a.exploreAt < 1500 {
@@ -612,4 +1366,15 @@ func (a *app) tickAutoExplore() {
 	a.exploreAt = nowMs()
 	a.exploreLeft--
 	a.explore()
+}
+
+// digitOf 把 '1'–'9' 与全角 '１'–'９' 都认成数字；其余返回 0。
+func digitOf(r rune) int {
+	switch {
+	case r >= '1' && r <= '9':
+		return int(r - '0')
+	case r >= '１' && r <= '９':
+		return int(r - '０')
+	}
+	return 0
 }

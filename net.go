@@ -26,6 +26,7 @@ const (
 	cmdLogin cmdKind = iota
 	cmdAct
 	cmdChat
+	cmdText
 	cmdLogout
 	cmdShutdown
 )
@@ -395,6 +396,12 @@ func wsSession(server, token string, cmds <-chan netCmd, send func(netEvent)) se
 				seq++
 				conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 				if err := conn.WriteMessage(websocket.TextMessage, actFrame(seq, c.action, c.data)); err != nil {
+					return sessionEnd{kind: endClosed, code: 1001, reason: "发送失败"}
+				}
+			case cmdText:
+				seq++
+				conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+				if err := conn.WriteMessage(websocket.TextMessage, cmdFrame(seq, c.text)); err != nil {
 					return sessionEnd{kind: endClosed, code: 1001, reason: "发送失败"}
 				}
 			case cmdChat:

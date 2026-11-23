@@ -19,6 +19,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,6 +33,8 @@ type args struct {
 	page     string
 	move     int
 	explore  int
+	keys     string
+	wait     int
 	hasMove  bool
 	snapshot string
 	color    string
@@ -47,6 +50,8 @@ func parseArgs() args {
 	flag.StringVar(&a.page, "page", "", "起始页：game|character|bag|skills|social|market|sect|map|settings")
 	flag.IntVar(&a.move, "move", 0, "进主界面后自动走第 n 个出口（从 0 起）")
 	flag.IntVar(&a.explore, "explore", 0, "进主界面后自动历练 n 次（间隔 1.5 秒，联调用）")
+	flag.StringVar(&a.keys, "keys", "", "快照前模拟按键（逗号分隔）：f2,down,enter；单字符直接写，如 ? 或 /")
+	flag.IntVar(&a.wait, "wait", 0, "进主界面后再等 n 秒（等赶路到达、等战斗结算）")
 	flag.StringVar(&a.snapshot, "snapshot", "", "离屏渲染一屏到文件后退出")
 	flag.StringVar(&a.color, "color", "", "颜色：true|256|off")
 	flag.IntVar(&a.width, "w", 110, "快照宽度（列）")
@@ -216,6 +221,19 @@ func runSnapshot(a *app, argv args, mode colorMode) error {
 				break
 			}
 		}
+		if argv.wait > 0 {
+			pump(a, time.Duration(argv.wait)*time.Second)
+		}
+		if spec := argv.keys; spec != "" {
+			// 脚本按键：每个键之间留出一次往返的时间，装备/买卖这类
+			// 要等服务端回 state 才看得到结果。
+			for _, k := range scriptKeys(spec) {
+				a.onKey(k)
+				pump(a, 250*time.Millisecond)
+			}
+			pump(a, 700*time.Millisecond)
+			goto done
+		}
 		// 收尾：等地图与日志齐一点，画面更像真实一帧。
 		// 已经进战斗/奇遇时只等一小会儿，免得服务端等不到出手把战斗中止。
 		settleFor := 700 * time.Millisecond
@@ -250,4 +268,49 @@ done:
 		text = strings.ReplaceAll(text, "\x1b[", "")
 	}
 	return os.WriteFile(argv.snapshot, []byte(text), 0o644)
+}
+
+// scriptKeys 把 --keys 的写法解析成按键：up/down/…/f1–f12 走特殊键，
+// 其余按单个字符处理；像 "ab" 这样的多字符会拆成两个按键。
+func scriptKeys(spec string) []key {
+	var out []key
+	for _, part := range strings.Split(spec, ",") {
+		part = strings.TrimSpace(part)
+		switch part {
+		case "":
+			continue
+		case "up", "down", "left", "right", "enter", "esc", "tab", "space",
+			"pgup", "pgdn", "home", "end", "backspace":
+			out = append(out, special(part))
+			continue
+		}
+		if len(part) >= 2 && part[0] == 'f' {
+			// 必须按数字比："2" <= "12" 在字符串序里是假，会把 f2 当成字符 f 和 2。
+			if n, err := strconv.Atoi(part[1:]); err == nil && n >= 1 && n <= 12 {
+				out = append(out, special(part))
+				continue
+			}
+		}
+		for _, r := range part {
+			out = append(out, key{kind: keyRune, r: r})
+		}
+	}
+	return out
+}
+
+// pump 在 d 时间里持续消化事件与定时任务，让脚本按键能看到服务端回包。
+func pump(a *app, d time.Duration) {
+	deadline := time.After(d)
+	tick := time.NewTicker(50 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		select {
+		case ev := <-a.evs:
+			a.handleEvent(ev)
+		case <-tick.C:
+			a.tick()
+		case <-deadline:
+			return
+		}
+	}
 }

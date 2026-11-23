@@ -237,6 +237,7 @@ type appState struct {
 	graph       *mapGraph
 	battle      *battleView
 	encounter   *eventView
+	catalog     *catalogView
 	clockOffset int64
 	season      string
 	daypart     string
@@ -259,6 +260,7 @@ func (st *appState) applyReady(r *readyView) {
 	}
 	st.presence = r.onlineCount()
 	st.hasChar = r.hasCharacter()
+	st.catalog = r.Catalog
 	st.season, st.daypart = r.Season, r.Daypart
 	if r.Player != nil {
 		st.applyState(r.Player)

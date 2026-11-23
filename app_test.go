@@ -34,7 +34,7 @@ func TestNewLocMapResetsSelection(t *testing.T) {
 
 func TestDataPageIgnoresNavAndEnter(t *testing.T) {
 	a := testApp()
-	a.ui.page = pageMap
+	a.ui.page = pageCharacter
 	a.ui.selectedExit = 1
 
 	a.onKey(special("down"))
@@ -45,7 +45,7 @@ func TestDataPageIgnoresNavAndEnter(t *testing.T) {
 	a.onKey(special("enter"))
 	select {
 	case c := <-a.cmds:
-		t.Fatalf("数据页按 Enter 不该发命令：%+v", c)
+		t.Fatalf("角色页按 Enter 不该发命令：%+v", c)
 	default:
 	}
 
@@ -53,6 +53,20 @@ func TestDataPageIgnoresNavAndEnter(t *testing.T) {
 	a.onKey(special("esc"))
 	if a.ui.page != pageGame {
 		t.Fatal("Esc 应回到主界面")
+	}
+}
+
+func TestMapPageEnterRefreshes(t *testing.T) {
+	a := testApp()
+	a.ui.page = pageMap
+	a.onKey(special("enter"))
+	select {
+	case c := <-a.cmds:
+		if c.action != actWorldMap {
+			t.Fatalf("舆图页 Enter 应刷新 worldMap，实为 %q", c.action)
+		}
+	default:
+		t.Fatal("舆图页 Enter 应发 worldMap")
 	}
 }
 

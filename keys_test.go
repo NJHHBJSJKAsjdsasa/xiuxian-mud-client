@@ -92,3 +92,13 @@ func TestUnknownCSISwallowed(t *testing.T) {
 		t.Fatalf("解析结果不对：%+v", ks)
 	}
 }
+
+func TestScriptKeysParseFunctionKeys(t *testing.T) {
+	ks := scriptKeys("f2,down,enter")
+	if len(ks) != 3 {
+		t.Fatalf("应解析出 3 个键，实为 %d：%+v", len(ks), ks)
+	}
+	if !ks[0].is("f2") || !ks[1].is("down") || !ks[2].is("enter") {
+		t.Fatalf("解析结果不对：%+v", ks)
+	}
+}

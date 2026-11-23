@@ -65,7 +65,7 @@ client/
 ├── vt_other.go      Unix 空实现
 ├── docs/            设计文档（本目录）
 ├── tools/doc-check.py  文档自查
-└── *_test.go        41 项单测
+└── *_test.go        105 项单测
 ```
 
 ## 4. 并发模型
