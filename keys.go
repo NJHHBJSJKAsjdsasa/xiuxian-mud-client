@@ -258,6 +258,7 @@ type uiState struct {
 	chatText     string
 	typing       bool
 	selectedExit int
+	target       int // 战斗中选中的敌方序号（1 起，对应 battle.foes[].i）
 	toasts       []toast
 	fatal        string
 }
@@ -271,6 +272,7 @@ func newUIState(server string) uiState {
 			focus:  1, // 服务器地址通常不用改，光标直接落在道号上
 		},
 		chatCh: "world",
+		target: 1,
 	}
 }
 

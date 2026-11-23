@@ -235,6 +235,8 @@ type appState struct {
 	logs        *logBuf
 	chats       []chatMsg
 	graph       *mapGraph
+	battle      *battleView
+	encounter   *eventView
 	clockOffset int64
 	season      string
 	daypart     string

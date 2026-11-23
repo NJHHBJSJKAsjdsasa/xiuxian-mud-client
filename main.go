@@ -31,6 +31,7 @@ type args struct {
 	create   string
 	page     string
 	move     int
+	explore  int
 	hasMove  bool
 	snapshot string
 	color    string
@@ -45,6 +46,7 @@ func parseArgs() args {
 	flag.StringVar(&a.create, "create", "", "登录后自动建号")
 	flag.StringVar(&a.page, "page", "", "起始页：game|character|bag|skills|social|market|sect|map|settings")
 	flag.IntVar(&a.move, "move", 0, "进主界面后自动走第 n 个出口（从 0 起）")
+	flag.IntVar(&a.explore, "explore", 0, "进主界面后自动历练 n 次（间隔 1.5 秒，联调用）")
 	flag.StringVar(&a.snapshot, "snapshot", "", "离屏渲染一屏到文件后退出")
 	flag.StringVar(&a.color, "color", "", "颜色：true|256|off")
 	flag.IntVar(&a.width, "w", 110, "快照宽度（列）")
@@ -94,6 +96,9 @@ func main() {
 	}
 	if argv.hasMove {
 		a.autoMove(argv.move)
+	}
+	if argv.explore > 0 {
+		a.autoExplore(argv.explore)
 	}
 
 	if argv.snapshot != "" {
@@ -186,7 +191,11 @@ func runSnapshot(a *app, argv args, mode colorMode) error {
 	}
 
 	if argv.login != "" {
-		deadline := time.Now().Add(6 * time.Second)
+		wait := 6 * time.Second
+		if argv.explore > 0 {
+			wait = 12 * time.Second
+		}
+		deadline := time.Now().Add(wait)
 		for time.Now().Before(deadline) {
 			// tick 负责把待办的自动登录真正发出去，缺了它快照会一直停在登录页。
 			a.tick()
@@ -195,7 +204,12 @@ func runSnapshot(a *app, argv args, mode colorMode) error {
 				a.handleEvent(ev)
 			case <-time.After(50 * time.Millisecond):
 			}
-			if a.st.hasChar && a.st.world != nil {
+			// 战斗中/奇遇里画面已经是我们想看的那一屏，不用再等满。
+			if a.st.battle != nil || a.st.encounter != nil {
+				break
+			}
+			// 不带 --explore 时，进主界面就够；带的时候要留时间把历练跑完。
+			if argv.explore == 0 && a.st.hasChar && a.st.world != nil {
 				break
 			}
 			if a.st.conn.kind == connOffline || a.st.conn.kind == connFatal {
@@ -203,7 +217,12 @@ func runSnapshot(a *app, argv args, mode colorMode) error {
 			}
 		}
 		// 收尾：等地图与日志齐一点，画面更像真实一帧。
-		settle := time.After(700 * time.Millisecond)
+		// 已经进战斗/奇遇时只等一小会儿，免得服务端等不到出手把战斗中止。
+		settleFor := 700 * time.Millisecond
+		if a.st.battle != nil || a.st.encounter != nil {
+			settleFor = 150 * time.Millisecond
+		}
+		settle := time.After(settleFor)
 		for {
 			select {
 			case ev := <-a.evs:

@@ -19,6 +19,8 @@ const (
 	actCultivate    = "cultivate"
 	actBreakthrough = "breakthrough"
 	actChat         = "chat"
+	actBattle       = "battle"
+	actEncounter    = "encounter"
 )
 
 // 错误码：只有需要特殊处置的才列出来。
@@ -209,6 +211,58 @@ type exitView struct {
 	Blocked *bool   `json:"blocked"`
 	Until   *int64  `json:"until"`
 	Fee     *int64  `json:"fee"`
+}
+
+type eventView struct {
+	ID      string        `json:"id"`
+	Options []eventOption `json:"options"`
+}
+
+type eventOption struct {
+	Key  string `json:"key"`
+	Text string `json:"text"`
+}
+
+type battleView struct {
+	ID      string     `json:"id"`
+	Kind    string     `json:"kind"`
+	Turn    int        `json:"turn"`
+	Round   int        `json:"round"`
+	State   string     `json:"state"`
+	Enemy   *foeView   `json:"enemy"`
+	Me      *vitalBase `json:"me"`
+	Foes    []foeView  `json:"foes"`
+	Allies  []allyView `json:"allies"`
+	CanFlee bool       `json:"canFlee"`
+	Over    bool       `json:"over"`
+	Won     bool       `json:"won"`
+	Fled    bool       `json:"fled"`
+}
+
+type foeView struct {
+	I       int      `json:"i"`
+	ID      string   `json:"id"`
+	Name    string   `json:"name"`
+	HP      int64    `json:"hp"`
+	MaxHP   int64    `json:"maxHp"`
+	Lvl     int      `json:"lvl"`
+	Element string   `json:"element"`
+	Status  []string `json:"status"`
+	Dead    bool     `json:"dead"`
+}
+
+type allyView struct {
+	Name  string `json:"name"`
+	HP    int64  `json:"hp"`
+	MaxHP int64  `json:"maxHp"`
+	Down  bool   `json:"down"`
+}
+
+type vitalBase struct {
+	HP    int64 `json:"hp"`
+	MaxHP int64 `json:"maxHp"`
+	MP    int64 `json:"mp"`
+	MaxMP int64 `json:"maxMp"`
 }
 
 type npcView struct {

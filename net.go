@@ -92,7 +92,8 @@ type evLogs struct{ lines []logLine }
 type evMap struct{ m *mapView }
 type evChat struct{ c chatMsg }
 type evPresence struct{ n int64 }
-type evBattle struct{ raw json.RawMessage }
+type evBattle struct{ b *battleView }
+type evEvent struct{ e *eventView }
 type evErr struct{ code, msg string }
 type evAnnounce struct{ text string }
 
@@ -461,8 +462,16 @@ func handleFrame(data []byte, send func(netEvent)) (sessionEnd, bool) {
 		if json.Unmarshal(f.D, &p) == nil {
 			send(evPresence{n: p.Count})
 		}
+	case "event":
+		var e eventView
+		if json.Unmarshal(f.D, &e) == nil {
+			send(evEvent{e: &e})
+		}
 	case "battle":
-		send(evBattle{raw: f.D})
+		var b battleView
+		if json.Unmarshal(f.D, &b) == nil {
+			send(evBattle{b: &b})
+		}
 	case "err":
 		var e struct {
 			Code string `json:"code"`

@@ -262,3 +262,31 @@ func TestRenderSettingsPageContent(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderBattleBox(t *testing.T) {
+	a := battleApp()
+	frame := assertFrameWidth(t, a, 100, 30)
+	all := strings.Join(frame, "\n")
+	for _, want := range []string{"战斗 · 第 1 回合", "山兔精", "黑风狼", "气血", "白露"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("战斗盒缺 %q", want)
+		}
+	}
+	if !strings.Contains(all, "a 普攻") || !strings.Contains(all, "f 逃") {
+		t.Error("战斗时按键行没换成战斗键位")
+	}
+	if strings.Contains(all, "去处") {
+		t.Error("战斗时不该再画去处盒")
+	}
+}
+
+func TestRenderEncounterOverlay(t *testing.T) {
+	a := encounterApp()
+	frame := assertFrameWidth(t, a, 100, 30)
+	all := strings.Join(frame, "\n")
+	for _, want := range []string{"奇遇", "静心打坐", "翻开石缝", "按 1–3 选择"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("奇遇弹层缺 %q", want)
+		}
+	}
+}

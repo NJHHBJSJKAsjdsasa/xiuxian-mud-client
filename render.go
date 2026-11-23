@@ -33,6 +33,9 @@ func (a *app) render(w, h int) *screen {
 			a.drawPage(sc)
 		}
 	}
+	if a.st.encounter != nil && a.ui.view == viewMain {
+		drawEncounter(sc, a.st.encounter)
+	}
 	drawToast(sc, &a.ui)
 	return sc
 }
@@ -160,7 +163,11 @@ func (a *app) drawGame(sc *screen) {
 			statusW = 30
 		}
 		a.drawStatusBox(sc, 0, 1, statusW, mainH)
-		a.drawExitsBox(sc, statusW+1, 1, w-statusW-1, mainH)
+		if a.st.battle != nil {
+			a.drawBattleBox(sc, statusW+1, 1, w-statusW-1, mainH)
+		} else {
+			a.drawExitsBox(sc, statusW+1, 1, w-statusW-1, mainH)
+		}
 	} else {
 		// 窄屏：三根命脉压成一行，省下的高度全给去处。
 		a.drawStatusLine(sc, 1)
@@ -362,6 +369,99 @@ func (a *app) drawExitsBox(sc *screen, x, y, w, h int) {
 	}
 }
 
+// drawBattleBox 战斗面板：敌方逐只血条（1–9 选目标）、队友血条、底部按键提示。
+//
+// 我方气血真气不在这里重复——左边的状态盒一直在显示。
+func (a *app) drawBattleBox(sc *screen, x, y, w, h int) {
+	b := a.st.battle
+	title := fmt.Sprintf("战斗 · 第 %d 回合", battleRound(b))
+	box(sc, x, y, w, h, title, true)
+	ix, iw := boxInner(x, w)
+	if iw < 20 || h < 5 {
+		return
+	}
+
+	foes := b.Foes
+	if len(foes) == 0 && b.Enemy != nil {
+		foes = []foeView{*b.Enemy}
+	}
+
+	barW := 8
+	if iw > 64 {
+		barW = 12
+	}
+
+	rowY := y + 1
+	rows := h - 2
+	reserve := 1 // 底部按键提示
+	foeRows := len(foes)
+	if maxFoe := rows - reserve; foeRows > maxFoe {
+		foeRows = maxFoe
+	}
+
+	for i := 0; i < foeRows && i < len(foes); i++ {
+		f := foes[i]
+		idx := f.I
+		if idx == 0 {
+			idx = i + 1
+		}
+		marker := "  "
+		st := fg(colText)
+		if idx == a.ui.target {
+			marker = "▸ "
+			st = fgBg(colBG, colAccent)
+		} else if f.Dead {
+			st = fg(colFaint)
+		}
+		row(sc, ix, rowY, iw, st)
+
+		val := fmt.Sprintf("%d/%d", f.HP, f.MaxHP)
+		vv := textWidth(val)
+		barX := ix + iw - vv - barW - 1
+		nameW := barX - ix - 4 - 2
+		if nameW < 4 {
+			nameW = 4
+		}
+		left := fmt.Sprintf("%d %s%s", idx, marker, truncateWidth(f.Name, nameW))
+		sc.put(ix, rowY, left, st)
+		// 名字与血条之间用点线引导，宽盒里不至于两头漂。
+		if gap := barX - (ix + textWidth(left)) - 1; gap > 0 {
+			n := min(gap, 10)
+			sc.put(ix+textWidth(left)+1, rowY, strings.Repeat("·", n), fg(colFaint))
+		}
+		sc.put(barX, rowY, gauge(f.HP, maxi(f.MaxHP, 1), barW), fg(colBad))
+		sc.put(ix+iw-vv, rowY, val, st)
+		rowY++
+	}
+
+	for _, al := range b.Allies {
+		if rowY >= y+h-1-reserve {
+			break
+		}
+		label := truncateWidth(al.Name, 4)
+		gaugeRow(sc, ix, rowY, 5, barW, label, al.HP, maxi(al.MaxHP, 1), colGood)
+		rowY++
+	}
+
+	if b.State == "player" && rowY < y+h-1-reserve {
+		sc.put(ix, rowY, "轮到你了", fg(colDim))
+		rowY++
+	}
+	if y+h-2 > y+1 {
+		sc.put(ix, y+h-2, "a 普攻   s 技能   f 逃", fg(colFaint))
+	}
+}
+
+func battleRound(b *battleView) int {
+	if b.Round > b.Turn {
+		return b.Round
+	}
+	if b.Turn > 0 {
+		return b.Turn
+	}
+	return 1
+}
+
 func (a *app) drawLogBox(sc *screen, x, y, w, h int) {
 	box(sc, x, y, w, h, "见闻", false)
 	ix, iw := boxInner(x, w)
@@ -405,6 +505,14 @@ func (a *app) drawObjective(sc *screen, y int) {
 }
 
 func (a *app) objective() (string, string) {
+	if b := a.st.battle; b != nil {
+		target := "第一只活着的"
+		if f := a.foeByIndex(a.ui.target); f != nil {
+			target = f.Name
+		}
+		return fmt.Sprintf("战斗 · 第 %d 回合", battleRound(b)),
+			fmt.Sprintf("目标 %s（a 普攻 · s 技能 · f 逃）", target)
+	}
 	if p := a.st.player; p != nil && p.Travel != nil {
 		return "赶路中", fmt.Sprintf("前往 %s，还剩 %s", p.Travel.Name, fmtCountdown(p.Travel.ArriveAt-a.st.serverNow()))
 	}
@@ -435,6 +543,9 @@ func (a *app) drawHint(sc *screen, y int) {
 		return
 	}
 	keys := "Space 历练   c 打坐   b 突破   l 四周   / 说话   PgUp 见闻   F1–F8 页面   o 退出登录   q 退出"
+	if a.st.battle != nil {
+		keys = "a 普攻   s 技能   f 逃   1–9 选目标   PgUp 战报"
+	}
 	sc.put(1, y, truncateWidth(keys, sc.w-2), fg(colFaint))
 }
 
@@ -645,6 +756,47 @@ func (a *app) drawSettings(sc *screen, x, y, w, h int) {
 	sc.put(x, y+5, "退出登录：Esc 回主界面后按 o（只退出账号，不退出客户端）", fg(colFaint))
 }
 
+// drawEncounter 奇遇三选一：居中弹层，数字键选。
+func drawEncounter(sc *screen, e *eventView) {
+	h := len(e.Options) + 6
+	w := 46
+	if w > sc.w-4 {
+		w = sc.w - 4
+	}
+	if h > sc.h-2 {
+		h = sc.h - 2
+	}
+	x := (sc.w - w) / 2
+	y := (sc.h - h) / 2
+	if x < 1 {
+		x = 1
+	}
+	if y < 1 {
+		y = 1
+	}
+	// 奇遇要停下来做选择：保留标题栏，其余整屏铺底，避免弹层边框与底下的盒子
+	// 边框在同一行"错位拼接"。
+	rowFill(sc, 0, 1, sc.w, sc.h-1)
+	box(sc, x, y, w, h, "奇遇", true)
+	ix, iw := boxInner(x, w)
+	for i, opt := range e.Options {
+		if y+2+i >= y+h-2 {
+			break
+		}
+		line := fmt.Sprintf("%d  %s", i+1, opt.Text)
+		sc.put(ix, y+2+i, truncateWidth(line, iw), fg(colText))
+	}
+	sc.put(ix, y+h-2, "按 1–"+itoa(len(e.Options))+" 选择", fg(colFaint))
+}
+
+// rowFill 用面板底色铺一块矩形，避免弹层底下透出内容。
+func rowFill(sc *screen, x, y, w, h int) {
+	st := style{fg: colText, bg: colBG, hasBG: true}
+	for j := y; j < y+h; j++ {
+		row(sc, x, j, w, st)
+	}
+}
+
 // ---------------- toast ----------------
 
 func drawToast(sc *screen, ui *uiState) {
@@ -656,13 +808,18 @@ func drawToast(sc *screen, ui *uiState) {
 	if w < 8 {
 		return
 	}
+	// 放在目标行右端：不压盒子边框，也不挡按键表。
+	y := sc.h - 2
+	if y < 1 {
+		y = 1
+	}
 	x0 := sc.w - w - 1
 	st := style{fg: colBG, bg: colAccent, hasBG: true, bold: true}
 	if t.bad {
 		st = style{fg: colText, bg: colBad, hasBG: true, bold: true}
 	}
-	row(sc, x0, 1, w, st)
-	sc.put(x0+1, 1, "! "+truncateWidth(t.text, w-3), st)
+	row(sc, x0, y, w, st)
+	sc.put(x0+1, y, "! "+truncateWidth(t.text, w-3), st)
 }
 
 // ---------------- 小工具 ----------------

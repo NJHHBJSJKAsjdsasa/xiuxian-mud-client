@@ -24,6 +24,8 @@ type app struct {
 	pendingLogin  *loginAttempt
 	pendingCreate string
 	pendingMove   *int
+	exploreLeft   int
+	exploreAt     int64
 	preferredPage *page
 	// 下一次允许补拉舆图的时刻（毫秒）。赶路中服务端会拒 worldMap（E-BUSY），
 	// 拒了就等一会儿再要，否则地名会一直停在出发地。
@@ -68,6 +70,9 @@ func (a *app) autoLogin(name, pass string) {
 func (a *app) autoCreate(name string) { a.pendingCreate = name }
 
 func (a *app) autoMove(i int) { a.pendingMove = &i }
+
+// autoExplore 进主界面后自动历练 n 次（间隔 1.5s），联调时用来撞战斗与奇遇。
+func (a *app) autoExplore(n int) { a.exploreLeft = n }
 
 func (a *app) startPage(name string) {
 	p := pageGame
@@ -152,6 +157,8 @@ func (a *app) handleEvent(ev netEvent) {
 			}
 		}
 	case evState:
+		// 战斗开始/奇遇出现之后服务端也会补一条 state，这里不能清战斗盒与弹层：
+		// 战斗结束靠 over=true 的 battle 帧，奇遇靠玩家选完主动收起。
 		moved := a.st.player != nil && a.st.player.Loc != e.p.Loc
 		a.st.applyState(e.p)
 		if moved {
@@ -204,8 +211,18 @@ func (a *app) handleEvent(ev netEvent) {
 		}
 	case evAnnounce:
 		a.st.pushLogs([]logLine{{K: "sys", S: "【公告】" + e.text}})
+	case evEvent:
+		a.st.encounter = e.e
 	case evBattle:
-		// 战斗过程以服务端下发的 log 行进见闻，这里暂不做独立战斗面。
+		a.st.battle = e.b
+		if e.b.Over {
+			// 结算帧只带 id/over/won（没有敌方与我方），记一行结果后收掉战斗盒。
+			a.st.pushLogs([]logLine{{K: "lvl", S: battleResultText(e.b)}})
+			a.st.battle = nil
+		}
+		if a.ui.target < 1 {
+			a.ui.target = 1
+		}
 	}
 }
 
@@ -319,6 +336,16 @@ func (a *app) keyMain(k key) {
 		case k.kind == keyRune:
 			a.ui.appendRune(k.r)
 		}
+		return
+	}
+
+	if e := a.st.encounter; e != nil && a.ui.page == pageGame {
+		a.keyEncounter(k, e)
+		return
+	}
+
+	if b := a.st.battle; b != nil && a.ui.page == pageGame {
+		a.keyBattle(k, b)
 		return
 	}
 
@@ -451,6 +478,7 @@ func (a *app) intentLogout() {
 // tick 处理与时间有关的事：舆图补拉、登录超时、toast 过期、待办登录。
 func (a *app) tick() {
 	a.refreshStaleMap()
+	a.tickAutoExplore()
 	if a.ui.login.loading && a.submitAt > 0 && nowMs()-a.submitAt > 12_000 {
 		a.ui.login.loading = false
 		a.ui.login.err = "服务端没有响应，请检查地址与网络"
@@ -484,4 +512,104 @@ func (a *app) refreshStaleMap() {
 
 func (a *app) shutdown() {
 	a.send(netCmd{kind: cmdShutdown})
+}
+
+// keyBattle 战斗中的按键：a 普攻、s 技能、f 逃、1–9 选目标。
+func (a *app) keyBattle(k key, b *battleView) {
+	switch {
+	case k.is("pgup"), k.is("pgdn"), k.is("home"), k.is("end"):
+		a.scrollLogs(k)
+	case k.kind == keyRune && k.r >= '1' && k.r <= '9':
+		n := int(k.r - '0')
+		if a.foeByIndex(n) != nil {
+			a.ui.target = n
+		}
+	case k.isRune('a'), k.is("space"), k.is("enter"):
+		a.act(actBattle, map[string]any{"op": "attack", "target": a.ui.target})
+	case k.isRune('s'):
+		if id := a.firstSkill(); id != "" {
+			a.act(actBattle, map[string]any{"op": "skill", "id": id, "target": a.ui.target})
+		} else {
+			a.ui.toast("还没装配技能，先按 a 普攻", true)
+		}
+	case k.isRune('f'), k.is("esc"):
+		if b.CanFlee {
+			a.act(actBattle, map[string]any{"op": "flee"})
+		} else {
+			a.ui.toast("这一战逃不掉", true)
+		}
+	}
+}
+
+// foeByIndex 按 battle.foes[].i 找敌方；找不到返回 nil。
+func (a *app) foeByIndex(i int) *foeView {
+	if a.st.battle == nil {
+		return nil
+	}
+	for idx := range a.st.battle.Foes {
+		got := a.st.battle.Foes[idx].I
+		if got == 0 {
+			// 服务端个别战斗帧没填 i，按序号兜底。
+			got = idx + 1
+		}
+		if got == i {
+			return &a.st.battle.Foes[idx]
+		}
+	}
+	return nil
+}
+
+// firstSkill 返回已装配的第一个技能 id（没有就空串）。
+func (a *app) firstSkill() string {
+	if a.st.player == nil {
+		return ""
+	}
+	for _, s := range a.st.player.SkillBook {
+		if s.Equipped {
+			return s.ID
+		}
+	}
+	return ""
+}
+
+func battleResultText(b *battleView) string {
+	switch {
+	case b.Won:
+		return "战斗胜利。"
+	case b.Fled:
+		return "你脱离了战斗。"
+	case b.Over:
+		return "战斗结束。"
+	default:
+		return "战斗继续。"
+	}
+}
+
+// keyEncounter 奇遇三选一：只认数字键，选完立刻收起弹层（服务端还会回 state）。
+func (a *app) keyEncounter(k key, e *eventView) {
+	if k.kind != keyRune || k.r < '1' || k.r > '9' {
+		return
+	}
+	i := int(k.r-'0') - 1
+	if i >= len(e.Options) {
+		return
+	}
+	a.act(actEncounter, map[string]any{"key": e.Options[i].Key})
+	a.st.encounter = nil
+}
+
+// tickAutoExplore 自动历练：只在主界面、无战斗、无奇遇时发，间隔 1.5 秒。
+func (a *app) tickAutoExplore() {
+	if a.exploreLeft <= 0 || !a.online() || a.st.player == nil {
+		return
+	}
+	if a.st.battle != nil || a.st.encounter != nil {
+		return
+	}
+	if nowMs()-a.exploreAt < 1500 {
+		return
+	}
+	a.exploreAt = nowMs()
+	a.exploreLeft--
+	a.explore()
 }
