@@ -2,7 +2,7 @@
 
 ```
 doc_id: C-04
-version: 4.1.0
+version: 4.1.1
 updated: 2026-11-23
 owns: 状态消费方式、重绘策略、时钟与倒计时、本地禁算清单
 depends_on: 服务端 05（P-MSG-02/04）、C-02
@@ -45,15 +45,15 @@ depends_on: 服务端 05（P-MSG-02/04）、C-02
 | 表格排序 / 筛选 | `UiState` 各页字段 | 关闭页面不清；重连后保留 |
 | 日志环形缓冲 | `store::logbuf`（5000 行） | 超出淘汰最早，`C-08` §2 |
 
-排版不做缓存：每帧只为**可见行**拼 `Line`（7 行见闻、一屏表格行），
+排版不做缓存：每帧只为**可见行**写格子（见闻盒、一屏表格行），
 宽字符对齐交给 `screen.put`；10 万行日志也只画看得见的部分。
 
 ## 4. 时钟与倒计时
 
-- `offset = ready.server_now - now_ms()`；之后统一 `server_now() = now_ms() + offset`。
-- 赶路：`travel.arrive_at` 是服务端毫秒时间戳，倒计时 = `arrive_at - server_now()`；到点后**不要自行切换界面**，等 `state` / `log` 的到达帧。
+- `offset = ready.serverNow - nowMs()`；之后统一 `serverNow() = nowMs() + offset`。
+- 赶路：`travel.arriveAt` 是服务端毫秒时间戳，倒计时 = `arriveAt - serverNow()`；到点后**不要自行切换界面**，等 `state` / `log` 的到达帧。
 - 秘境每层限时、实时切磋每回合 15 秒：同样以服务端给的 `deadline` 为准。
-- 系统休眠/唤醒后 `now_ms()` 会跳变，倒计时自然重算；不要把"经过的秒数"累加。
+- 系统休眠/唤醒后 `nowMs()` 会跳变，倒计时自然重算；不要把"经过的秒数"累加。
 - 倒计时文本每秒最多变一次，不要在 `ui` 里格式化毫秒（除切磋最后 5 秒）。
 
 ## 5. 本地禁算清单

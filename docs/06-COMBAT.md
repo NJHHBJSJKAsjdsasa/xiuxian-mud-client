@@ -2,8 +2,8 @@
 
 ```
 doc_id: C-06
-version: 4.0.0
-updated: 2026-11-22
+version: 4.0.1
+updated: 2026-11-23
 owns: 战斗帧、多人遭遇、实时切磋、秘境、赶路的客户端处理与界面呈现
 depends_on: 服务端 05（battle / pvpResult / live / dg / move 帧与动作）、C-05
 ```
@@ -67,7 +67,7 @@ depends_on: 服务端 05（battle / pvpResult / live / dg / move 帧与动作）
 ## 4. 实时切磋（`live`）
 
 - 帧：`{id, round, deadline, side, you{...}, foe{...}, over, winner, log[]}`。
-- 每回合 15 秒；`deadline` 是服务端时间戳，倒计时用 `server_now()`。
+- 每回合 15 秒；`deadline` 是服务端时间戳，倒计时用 `serverNow()`。
 - 出手：`live {op:"act", kind:"attack"|"skill"|"yield", skill?}`；同回合只能出一次。
 
 界面：
@@ -88,7 +88,7 @@ depends_on: 服务端 05（battle / pvpResult / live / dg / move 帧与动作）
 
 ## 6. 赶路
 
-- `move {to}` 受理后，用 `state.travel` 显示倒计时；`arrive_at` 是绝对时间。
+- `move {to}` 受理后，用 `state.travel` 显示倒计时；`arriveAt` 是绝对时间。
 - 到达前禁用依赖地点的动作（历练、副本、交易）：按键不响应，提示行写「正在赶路 00:07」。
 - 到达后由服务端推 `state`/`log`；**不要本地切换节点**。
 - 赶路途中 `worldMap` 会被服务端拒（`E-BUSY`，此刻不可为）：客户端按 600ms 节流补拉，

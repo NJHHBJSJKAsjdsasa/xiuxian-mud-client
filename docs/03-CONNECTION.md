@@ -2,7 +2,7 @@
 
 ```
 doc_id: C-03
-version: 4.1.0
+version: 4.1.1
 updated: 2026-11-23
 owns: 登录流程、协议版本握手、心搏、重连状态机、关闭码处置、终端生命周期
 depends_on: 服务端 05（P-REST-01/02、P-MSG-01/05、关闭码表）、12（快速开始）
@@ -18,11 +18,12 @@ depends_on: 服务端 05（P-REST-01/02、P-MSG-01/05、关闭码表）、12（�
         │
         ├─ REST 登录     POST /api/login {name, pass} → 200 {token, hasChar}
         │      │
-        │      ├─ WS 连接   ws(s)://<host>/ws （tokio-tungstenite + rustls，5 秒超时）
+        │      ├─ WS 连接   ws(s)://<host>/ws （gorilla/websocket，握手 8 秒超时）
         │      │      │
         │      │      ├─ hello  {"t":"hello","d":{"token":"...","proto":1}}
         │      │      │
-        │      │      ├─ ready  {proto, minProto, hasChar, player?, catalog, serverNow, ...}
+        │      │      ├─ ready  已建号 {proto, minProto, player, world, catalog, chatHist, serverNow}
+        │      │      │            未建号 {proto, minProto, hasChar:false, catalog:null}
         │      │      │      │
         │      │      │      ├─ hasChar=false → 建号页（create → ready）
         │      │      │      └─ hasChar=true  → 主界面
@@ -32,17 +33,16 @@ depends_on: 服务端 05（P-REST-01/02、P-MSG-01/05、关闭码表）、12（�
         │      └─ 失败 → 登录页内联错误（不弹系统对话框）
 ```
 
-- 登录页与主界面是**同一屏的两个页面**（`View::Login / Create / Main / Fatal`），不反复进出备用屏。
+- 登录页与主界面是**同一屏的两个页面**（`viewLogin / viewCreate / viewMain / viewFatal`），不反复进出备用屏。
 - 登录中的按钮进入 loading 态（禁点 + 转圈），请求 8 秒超时后恢复可点并显示原因。
-- `ready.server_now` 用来算时钟偏移：`offset = server_now - now_ms()`，之后所有倒计时都用服务端时间。
-- `--replay frames.jsonl` 时跳过整个 REST/WS 流程，直接进主界面并回放（`C-08` §6）。
+- `ready.serverNow` 用来算时钟偏移：`offset = serverNow - nowMs()`，之后所有倒计时都用服务端时间。
 
 ## 2. 协议版本（4004）
 
 | 情况 | 服务端行为 | 客户端行为 |
 |---|---|---|
 | `proto` 在 `[minProto, proto]` | 正常 `ready` | 进入游戏 |
-| 越界 | 先 `err`（`E-BADREQ`，正文带双方版本），再 `4004` 关闭 | **不重连**；切到 `View::Fatal`，显示服务端支持区间与本机版本，只留"退出"和"检查更新" |
+| 越界 | 先 `err`（`E-BADREQ`，正文带双方版本），再 `4004` 关闭 | **不重连**；切到 `viewFatal`，显示服务端支持区间与本机版本，只留"退出"和"检查更新" |
 
 - 4004 与 4003 必须分开处理：4003 是 token 失效 → 清 token、回登录；4004 是客户端要更新 → 清 token 也没用。
 - 收到 4004 后不要做退避重试，否则服务端日志里会刷出一串同样的握手失败。
@@ -51,8 +51,8 @@ depends_on: 服务端 05（P-REST-01/02、P-MSG-01/05、关闭码表）、12（�
 
 - 服务端 1001 表示心跳超时/写失败：读循环超过 60 秒没有任何帧（含 ping 回包），视为半开连接。
 - 客户端每 25 秒发一次 `{"t":"ping"}`；连续两次无响应，主动断开并按重连策略处理，不等 TCP 超时。
-- 所有等待都要有超时：`hello` 5 秒、`ready` 10 秒、REST 8 秒、单次动作 8 秒（超时按"未知结果"处理，刷新 `state` 对齐）。
-- 系统休眠/唤醒后 `now_ms()` 会跳变：唤醒时若 `now_ms() - last_frame_ms > 60s`，直接判定连接已死并重连，
+- 超时口径：`hello` 由服务端 5 秒计时；连接握手 8 秒；`ready` 不单设超时，走 60 秒读超时；REST 8 秒；动作不等回包，靠后续 `state` / `log` 对齐。
+- 系统休眠/唤醒后 `nowMs()` 会跳变：唤醒时若 `nowMs() - lastFrameMs > 60s`，直接判定连接已死并重连，
   不等 ping 超时（笔记本合盖一晚上回来，界面不能停在"在线"）。
 
 ## 4. 重连状态机
@@ -71,7 +71,7 @@ CONNECTING ──open──► HELLO ──ready──► ONLINE ──close(cod
 | 1011 | 服务端内部错误（读档失败等） | 退避重连；连续 3 次提示"服务异常，稍后再试" |
 | 4001 | 顶号 | **不重连**，提示"账号在别处登录"，回登录页 |
 | 4003 | token 失效 | 清 token，回登录 |
-| 4004 | 协议版本不兼容 | **不重连**，切 `View::Fatal` |
+| 4004 | 协议版本不兼容 | **不重连**，切 `viewFatal` |
 | 4029 | 频率超限被踢 | 60 秒后重连；期间禁用输入，顶栏显示倒计时 |
 
 重连成功后：
