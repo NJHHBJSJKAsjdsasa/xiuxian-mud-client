@@ -34,7 +34,7 @@ depends_on: C-00、C-02、C-03、服务端 docs/05、服务端 docs/13
 git clone git@github-client:NJHHBJSJKAsjdsasa/xiuxian-mud-client.git client
 cd client
 python tools/doc-check.py     # 文档矩阵与链接
-go build -o bin/playcli .     # 首次拉依赖（约 10 秒）
+go build -o bin/playcli .     # 首次拉依赖（约 10 秒）；Windows 用 bin/playcli.exe
 ./bin/playcli --server ws://127.0.0.1:8080
 ```
 

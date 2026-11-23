@@ -54,6 +54,7 @@ cd ../xianxia && go run ./cmd/server
 
 # 客户端（需要 80×24 以上终端）
 go build -o bin/playcli . && ./bin/playcli --server ws://127.0.0.1:8080
+# Windows 上产物要带 .exe 才方便双击：go build -o bin/playcli.exe .
 
 # 跳过登录页；还没有角色时自动建号
 ./bin/playcli --server ws://127.0.0.1:8080 --login 沈砚:test123456 --create 沈砚
