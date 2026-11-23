@@ -50,18 +50,27 @@ func newScreen(w, h int) *screen {
 		h = 1
 	}
 	s := &screen{w: w, h: h, buf: make([]cell, w*h)}
+	base := fg(colText).withBG(colBG)
 	for i := range s.buf {
-		s.buf[i] = cell{ch: ' ', st: fg(colText)}
+		s.buf[i] = cell{ch: ' ', st: base}
 	}
 	return s
 }
 
 // reset 清空画面但保留上一帧签名：复用同一个屏时，没变的行依然不会被重写。
 func (s *screen) reset() {
-	st := fg(colText)
+	st := fg(colText).withBG(colBG)
 	for i := range s.buf {
 		s.buf[i] = cell{ch: ' ', st: st}
 	}
+}
+
+// bgAt 取某格当前的底色，用于"只写前景色时沿用面板色"。
+func (s *screen) bgAt(i int) (rgb, bool) {
+	if i < 0 || i >= len(s.buf) {
+		return rgb{}, false
+	}
+	return s.buf[i].st.bg, s.buf[i].st.hasBG
 }
 
 func (s *screen) set(x, y int, ch rune, st style) {
@@ -73,12 +82,21 @@ func (s *screen) set(x, y int, ch rune, st style) {
 		return
 	}
 	i := y*s.w + x
-	s.buf[i] = cell{ch: ch, st: st}
-	if w == 2 {
-		if x+1 < s.w {
-			// 续格：终端已经把下一个位置让给了这个宽字，渲染时跳过。
-			s.buf[i+1] = cell{ch: 0, st: st}
+	// 只给前景色的写法（fg/put/kv…）沿用落笔处已有的底色：
+	// 盒子先铺面板色，里面写字不该再把面板戳成黑窟窿。
+	if !st.hasBG {
+		if bg, ok := s.bgAt(i); ok {
+			st = st.withBG(bg)
 		}
+	}
+	s.buf[i] = cell{ch: ch, st: st}
+	if w == 2 && x+1 < s.w {
+		// 续格：终端已经把下一个位置让给了这个宽字，渲染时跳过。
+		cont := st
+		if bg, ok := s.bgAt(i + 1); ok {
+			cont = cont.withBG(bg)
+		}
+		s.buf[i+1] = cell{ch: 0, st: cont}
 	}
 }
 

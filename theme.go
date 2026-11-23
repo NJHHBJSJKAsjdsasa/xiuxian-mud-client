@@ -24,8 +24,10 @@ func (c rgb) mix(o rgb, t float64) rgb {
 }
 
 var (
-	colBG     = rgb{5, 7, 9}
-	colPanel  = rgb{10, 13, 16}
+	// 屏幕底色与面板底色差一档：盒子内部铺面板色，看起来像卡片而不是
+	// 黑色空洞；纯黑（5,7,9）在多数显示器上与窗框糊成一片。
+	colBG     = rgb{16, 20, 26}
+	colPanel  = rgb{30, 37, 46}
 	colText   = rgb{226, 226, 214}
 	colDim    = rgb{120, 130, 138}
 	colFaint  = rgb{70, 78, 86}

@@ -122,6 +122,8 @@ func main() {
 // runTUI 进入全屏界面。管道/CI 里不要调用它。
 func runTUI(a *app, mode colorMode) error {
 	enableVT()
+	// 双击打开时把自己的控制台收拾成应用窗口：标题、无滚动条。
+	styleConsole()
 	fd := int(os.Stdin.Fd())
 	old, err := term.MakeRaw(fd)
 	if err != nil {

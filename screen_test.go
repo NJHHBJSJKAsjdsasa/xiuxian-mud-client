@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -76,5 +77,43 @@ func TestParseColorMode(t *testing.T) {
 	}
 	if parseColorMode("") != colorTrue {
 		t.Fatal("缺省应真彩")
+	}
+}
+
+func TestBoxFillsPanelBackground(t *testing.T) {
+	s := newScreen(20, 8)
+	box(s, 0, 0, 20, 8, "面板", true)
+
+	inside := s.buf[3*20+5]
+	if !inside.st.hasBG || inside.st.bg != colPanel {
+		t.Fatalf("盒子内部应铺面板色，实为 %+v", inside.st)
+	}
+	border := s.buf[0]
+	if !border.st.hasBG || border.st.bg != colBG {
+		t.Fatalf("边框应留在屏幕底色上，实为 %+v", border.st)
+	}
+}
+
+func TestTextKeepsPanelBackground(t *testing.T) {
+	s := newScreen(20, 8)
+	box(s, 0, 0, 20, 8, "", true)
+	s.put(3, 3, "文字", fg(colText))
+	c := s.buf[3*20+3]
+	if !c.st.hasBG || c.st.bg != colPanel {
+		t.Fatalf("盒内写字不该把面板戳成黑窟窿：%+v", c.st)
+	}
+}
+
+func TestRenderEmitsPanelBackground(t *testing.T) {
+	s := newScreen(20, 8)
+	box(s, 0, 0, 20, 8, "", true)
+	s.put(3, 3, "文字", fg(colText))
+	var b bytes.Buffer
+	w := bufio.NewWriter(&b)
+	s.render(w, colorTrue)
+	out := b.String()
+	want := fmt.Sprintf("48;2;%d;%d;%d", colPanel.r, colPanel.g, colPanel.b)
+	if !strings.Contains(out, want) {
+		t.Fatalf("真彩输出里没有面板底色 %s：%q", want, out)
 	}
 }

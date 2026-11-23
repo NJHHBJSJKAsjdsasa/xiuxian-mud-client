@@ -15,6 +15,11 @@ func box(sc *screen, x, y, w, h int, title string, accent bool) {
 	if w < 2 || h < 2 {
 		return
 	}
+	// 内部先铺面板色：一屏黑底上只有文字，看起来像控制台；
+	// 铺成比底色亮一档的面板，才是"卡片"而不是"黑框"。
+	if w > 2 && h > 2 {
+		sc.fill(x+1, y+1, w-2, h-2, ' ', fg(colText).withBG(colPanel))
+	}
 	line := fg(colFaint)
 	if accent {
 		line = fg(colDim)
