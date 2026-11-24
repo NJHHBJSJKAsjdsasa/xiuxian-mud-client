@@ -11,7 +11,8 @@ def main():
     for sub in ("game", "assets", "data"):
         os.makedirs(os.path.join(DIST, sub), exist_ok=True)
     shutil.copy2(os.path.join(ROOT, "bin", "launcher.exe"), os.path.join(DIST, "九州问道.exe"))
-    shutil.copy2(os.path.join(ROOT, "bin", "playcli.exe"), os.path.join(DIST, "game", "playcli.exe"))
+    shutil.copy2(os.path.join(ROOT, "bin", "gamehost.exe"), os.path.join(DIST, "game", "gamehost.exe"))
+    shutil.copy2(os.path.join(ROOT, "bin", "playcli.dll"), os.path.join(DIST, "game", "playcli.dll"))
     for name in ("banner.bmp", "icon.ico"):
         shutil.copy2(os.path.join(ROOT, "assets", name), os.path.join(DIST, "assets", name))
     shutil.copy2(os.path.join(ROOT, "data", "manifest.json"), os.path.join(DIST, "data", "manifest.json"))

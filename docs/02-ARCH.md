@@ -2,7 +2,7 @@
 
 ```
 doc_id: C-02
-version: 5.1.5
+version: 5.1.6
 updated: 2026-11-24
 owns: 技术选型、依赖、分层、目录结构、并发模型、模块依赖规则
 depends_on: C-01、C-03、C-04、C-05
@@ -64,6 +64,7 @@ client/
 ├── theme.go         调色板、日志色、方位箭头
 ├── gui_windows.go   Windows 桌面窗口：Win32/GDI 双缓冲、DPI、鼠标拖舆图
 ├── gui_other.go     非 Windows：runGUI 返回不支持
+├── export_dll.go    DLL 构建入口（//export RunGame，仅 -tags dll）
 ├── vt_windows.go    Windows 控制台开 VT
 ├── vt_other.go      Unix 空实现
 ├── cmd/launcher/    Windows 原生登录启动器（独立 exe）
@@ -85,7 +86,8 @@ client/
   channel；会话结束时关闭 `done`，读协程立刻退出，不留僵尸。
 - **两条通道**：命令 `chan netCmd`（缓冲 64）、事件 `chan netEvent`（缓冲 2048）；
 - **登录启动器**：独立进程 `launcher.exe` 读取 `data/manifest.json` 与 `assets/`，用原生 Win32
-  控件登录/注册；成功后按清单里的 `game` 路径 `exec` 游戏（默认 `game/playcli.exe`），token 走
+  控件登录/注册；成功后按清单里的 `game` 路径 `exec` 宿主 `game/gamehost.exe`，宿主用
+  `LoadLibrary` 加载同目录 `game/playcli.dll` 并调用导出的 `RunGame`；token 走
   `XIUXIAN_TOKEN` 环境变量，密码不进入命令行。
 - **桌面窗口**：GUI 线程 `runtime.LockOSThread` 跑 Win32 消息循环，250ms `WM_TIMER`
   里执行同一个 `drain → tick → render`；键盘/鼠标消息转换成同一套 `key` 与 `uiState`，

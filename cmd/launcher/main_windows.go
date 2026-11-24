@@ -620,13 +620,13 @@ func (l *launcher) finishAuth(res authOutcome) {
 		return
 	}
 	cmd := exec.Command(game, "--server", server, "--gui")
-	env := make([]string, 0, len(os.Environ())+1)
+	env := make([]string, 0, len(os.Environ())+2)
 	for _, kv := range os.Environ() {
-		if !strings.HasPrefix(kv, "XIUXIAN_TOKEN=") {
+		if !strings.HasPrefix(kv, "XIUXIAN_TOKEN=") && !strings.HasPrefix(kv, "XIUXIAN_SERVER=") {
 			env = append(env, kv)
 		}
 	}
-	cmd.Env = append(env, "XIUXIAN_TOKEN="+res.token)
+	cmd.Env = append(env, "XIUXIAN_TOKEN="+res.token, "XIUXIAN_SERVER="+server)
 	cmd.Dir = filepath.Dir(game)
 	if err := cmd.Start(); err != nil {
 		l.setStatus("启动游戏失败："+err.Error(), true)

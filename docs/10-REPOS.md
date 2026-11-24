@@ -2,7 +2,7 @@
 
 ```
 doc_id: C-10
-version: 4.3.1
+version: 4.3.2
 updated: 2026-11-24
 owns: 客户端仓的克隆、密钥、日常循环、与服务端的协议同步、构建发布与排错
 depends_on: C-00、C-02、C-03、服务端 docs/05、服务端 docs/13
@@ -57,8 +57,8 @@ make build                    # 首次拉依赖（约 10 秒）；产出 bin/pla
 make dist        # 需要 bin/playcli.exe 与 bin/launcher.exe，先跑 make build
 ```
 
-产出 `dist/九州问道/`：`九州问道.exe`（启动器）、`game/playcli.exe`、`assets/`（横幅/图标）、
-`data/manifest.json`、`README.txt`。启动器从 manifest 找游戏与版本，成功后以 token 启动游戏；
+产出 `dist/九州问道/`：`九州问道.exe`（启动器）、`game/gamehost.exe`（宿主）、
+`game/playcli.dll`（游戏本体）、`assets/`（横幅/图标）、`data/manifest.json`、`README.txt`。启动器从 manifest 找游戏与版本，成功后以 token 启动游戏；
 发布目录可以整个压缩分发，个人配置仍写 `%APPDATA%/xiuxian-client/playcli.json`。
 
 Linux 编译不需要任何图形库（纯终端）：只需要 Go 工具链，没有 `apt-get` 前置包。
@@ -101,6 +101,8 @@ GOOS=windows GOARCH=amd64 go build -ldflags "-s -w" -o bin/playcli.exe .
 GOOS=linux   GOARCH=amd64 go build -ldflags "-s -w" -o bin/playcli .
 GOOS=darwin  GOARCH=arm64 go build -ldflags "-s -w" -o bin/playcli .
 CGO_ENABLED=0 go build -ldflags "-s -w -H=windowsgui" -o bin/launcher.exe ./cmd/launcher  # Windows 启动器
+CGO_ENABLED=1 go build -tags dll -buildmode=c-shared -ldflags "-s -w" -o bin/playcli.dll .  # Windows 游戏 DLL
+gcc -O2 -mwindows -static -s -o bin/gamehost.exe packaging/gamehost.c                      # Windows 宿主
 ```
 
 | 平台 | 产物 | 备注 |

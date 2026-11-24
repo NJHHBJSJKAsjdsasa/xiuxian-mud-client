@@ -11,8 +11,9 @@ Windows 上双击 exe 默认打开**原生桌面窗口**：同一块字符屏由
 支持 DPI 感知、鼠标拖动舆图与最小 80×24 格；`--tui` 强制终端界面，`--gui` 强制窗口。
 核心仍是终端网格，没有第二套布局。
 
-Windows 还带一个独立启动器 `bin/launcher.exe`：原生 Win32 登录/注册窗口，成功后自动启动
-`playcli.exe --gui`；令牌通过 `XIUXIAN_TOKEN` 环境变量交接，密码不进入命令行。
+Windows 还带一个独立启动器 `bin/launcher.exe`：原生 Win32 登录/注册窗口；成功后启动
+`game/gamehost.exe`，宿主再加载 `game/playcli.dll`；令牌通过 `XIUXIAN_TOKEN` 环境变量交接，
+密码不进入命令行。
 
 游戏本体单二进制、无渲染后端、无资源目录：`go build` 完直接在终端里铺满，SSH 上去也能玩。
 界面的每个字符都由自己画——没有 TUI 框架，也没有 WebView。
@@ -90,7 +91,8 @@ make build                                  # 产出 bin/playcli(.exe) 与 bin/l
 ```
 dist/九州问道/
 ├── 九州问道.exe          启动器：登录 / 注册 / 拉起游戏
-├── game/playcli.exe      游戏本体
+├── game/gamehost.exe     游戏宿主：只负责加载 DLL
+├── game/playcli.dll      游戏本体（DLL）
 ├── assets/banner.bmp     启动器横幅（缺失时退回文字标题）
 ├── assets/icon.ico       窗口图标
 ├── data/manifest.json    名称 / 版本 / 游戏路径 / 默认服务器
@@ -98,7 +100,9 @@ dist/九州问道/
 ```
 
 启动器从 `data/manifest.json` 找游戏与版本、加载 `assets/`；成功后用 `XIUXIAN_TOKEN`
-环境变量启动 `game/playcli.exe --gui`。个人配置仍在 `%APPDATA%/xiuxian-client/playcli.json`。
+启动 `game/gamehost.exe`，宿主加载 `game/playcli.dll`。Go DLL 只依赖系统
+`KERNEL32` / UCRT，不需要额外运行库 DLL。打包需要 MSYS2 的 `gcc`（`make dist` 会自动编 DLL 与宿主）。
+个人配置仍在 `%APPDATA%/xiuxian-client/playcli.json`。
 ```
 
 ## 键位

@@ -76,7 +76,9 @@ func parseArgs() args {
 	return a
 }
 
-func main() {
+func main() { runMain() }
+
+func runMain() {
 	argv := parseArgs()
 	cfg := loadConfig()
 	if argv.server != "" {
