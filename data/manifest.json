@@ -1,6 +1,6 @@
 {
   "name": "九州问道",
   "version": "0.1.0",
-  "game": "game/gamehost.exe",
+  "game": "game/gamehost.dll",
   "server": "ws://127.0.0.1:8080"
 }

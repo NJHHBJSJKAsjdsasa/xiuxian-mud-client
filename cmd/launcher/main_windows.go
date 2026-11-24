@@ -202,7 +202,7 @@ type manifest struct {
 const defaultServer = "ws://127.0.0.1:8080"
 
 func loadManifest() manifest {
-	m := manifest{Name: "九州问道", Version: "0.1.0", Game: "game/playcli.exe", Server: defaultServer}
+	m := manifest{Name: "九州问道", Version: "0.1.0", Game: "game/gamehost.dll", Server: defaultServer}
 	for _, p := range candidatePaths(filepath.Join("data", "manifest.json")) {
 		text, err := os.ReadFile(p)
 		if err != nil {
@@ -894,7 +894,10 @@ func (l *launcher) startGame(token, server string) error {
 	if err != nil {
 		return err
 	}
-	cmd := exec.Command(game, "--server", server, "--gui")
+	cmd, err := gameCommand(game, server)
+	if err != nil {
+		return err
+	}
 	cmd.SysProcAttr = gameProcessAttrs()
 	env := make([]string, 0, len(os.Environ())+3)
 	for _, kv := range os.Environ() {
@@ -920,6 +923,30 @@ func (l *launcher) startGame(token, server string) error {
 	}()
 	go l.watchGame(pid, cmd, exited)
 	return nil
+}
+
+func rundll32Path() (string, error) {
+	if root := os.Getenv("SystemRoot"); root != "" {
+		p := filepath.Join(root, "System32", "rundll32.exe")
+		if _, err := os.Stat(p); err == nil {
+			return p, nil
+		}
+	}
+	return exec.LookPath("rundll32.exe")
+}
+
+// gameCommand 根据发布包里的宿主类型生成启动命令：
+// gamehost.dll 交给系统 rundll32（命令里只写相对文件名，避开中文/空格路径），
+// 旧的 gamehost.exe / playcli.exe 仍可直接执行。
+func gameCommand(game, server string) (*exec.Cmd, error) {
+	if strings.EqualFold(filepath.Ext(game), ".dll") {
+		rundll, err := rundll32Path()
+		if err != nil {
+			return nil, errors.New("找不到系统 rundll32.exe")
+		}
+		return exec.Command(rundll, filepath.Base(game)+",Launch"), nil
+	}
+	return exec.Command(game, "--server", server, "--gui"), nil
 }
 
 // 只禁止新控制台；不能设 HideWindow，它会让宿主第一次 ShowWindow 变成 SW_HIDE，
@@ -1018,7 +1045,11 @@ func gamePath(rel string) (string, error) {
 	if rel != "" {
 		cands = append(cands, filepath.Join(dir, filepath.FromSlash(rel)))
 	}
-	cands = append(cands, filepath.Join(dir, "game", "playcli.exe"), filepath.Join(dir, "playcli.exe"))
+	cands = append(cands,
+		filepath.Join(dir, "game", "gamehost.dll"),
+		filepath.Join(dir, "game", "gamehost.exe"),
+		filepath.Join(dir, "game", "playcli.exe"),
+		filepath.Join(dir, "playcli.exe"))
 	for _, cand := range cands {
 		if _, err := os.Stat(cand); err == nil {
 			return cand, nil
@@ -1027,7 +1058,7 @@ func gamePath(rel string) (string, error) {
 	if p, err := exec.LookPath("playcli.exe"); err == nil {
 		return p, nil
 	}
-	return "", errors.New("没找到游戏本体：检查 data/manifest.json 的 game 路径，或先 make dist")
+	return "", errors.New("没找到游戏宿主：检查 data/manifest.json 的 game 路径，或先 make dist")
 }
 
 func (l *launcher) setStatus(text string, bad bool) {

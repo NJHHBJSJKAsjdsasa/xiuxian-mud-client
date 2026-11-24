@@ -17,11 +17,11 @@ launcher:
 	CGO_ENABLED=0 go build $(GOFLAGS) -ldflags "-s -w -H=windowsgui" -o bin/launcher.exe ./cmd/launcher
 	@echo "built bin/launcher.exe"
 
-# 游戏本体编成 DLL；gamehost.exe 是只负责 LoadLibrary + RunGame 的宿主。
+# 游戏本体编成 DLL；gamehost.dll 由系统 rundll32 加载，只负责 LoadLibrary + RunGame。
 dll:
 	CGO_ENABLED=1 go build $(GOFLAGS) -tags dll -buildmode=c-shared -ldflags "-s -w" -o bin/playcli.dll .
-	gcc -O2 -mwindows -static -s -o bin/gamehost.exe packaging/gamehost.c
-	@echo "built bin/playcli.dll + bin/gamehost.exe"
+	gcc -O2 -shared -static -s -o bin/gamehost.dll packaging/gamehost_dll.c
+	@echo "built bin/playcli.dll + bin/gamehost.dll"
 
 # Windows 发布目录：启动器只是入口，游戏本体与资源、清单都作为独立文件随包。
 dist: build dll

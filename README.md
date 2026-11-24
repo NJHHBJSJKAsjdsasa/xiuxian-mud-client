@@ -13,7 +13,7 @@ F8 设置里的“窗口”行可切回带边框窗口。
 `--tui` 强制终端界面，`--gui` 强制窗口。核心仍是终端网格，没有第二套布局。
 
 Windows 还带一个独立启动器 `bin/launcher.exe`：原生 Win32 登录/注册窗口，带已存账号下拉与
-“记住密码（本机加密）”勾选框；成功后启动 `game/gamehost.exe`，宿主再加载 `game/playcli.dll`；
+“记住密码（本机加密）”勾选框；成功后由系统 `rundll32` 加载 `game/gamehost.dll`，宿主再加载 `game/playcli.dll`；
 令牌通过 `XIUXIAN_TOKEN` 环境变量交接，密码不进入命令行。
 
 游戏本体单二进制、无渲染后端、无资源目录：`go build` 完直接在终端里铺满，SSH 上去也能玩。
@@ -57,7 +57,7 @@ F8 设置可切换无边框 / 带边框并即时生效；输入行支持光标�
 
 - 分层：`proto`（协议） / `net`（连接） / `state`（状态） / `app`（交互） / `render`（绘制） /
   `gui`（Windows 原生窗口，非 Windows 为空实现）。
-- `go vet ./...` 干净，`go test ./...` 143 项全绿（含"每行宽度恰好等于终端宽"的逐字符断言）。
+- `go vet ./...` 干净，`go test ./...` 144 项全绿（含"每行宽度恰好等于终端宽"的逐字符断言）。
 - 协议以服务端 `docs/05-PROTOCOL.md` 为准，接入流程看 `docs/12-API.md`。
 
 ## 怎么跑
@@ -94,7 +94,7 @@ make build                                  # 产出 bin/playcli(.exe) 与 bin/l
 ```
 dist/九州问道/
 ├── 九州问道.exe          启动器：登录 / 注册 / 拉起游戏
-├── game/gamehost.exe     游戏宿主：只负责加载 DLL
+├── game/gamehost.dll     游戏宿主（DLL）：系统 rundll32 加载
 ├── game/playcli.dll      游戏本体（DLL）
 ├── assets/banner.bmp     启动器横幅（缺失时退回文字标题）
 ├── assets/icon.ico       窗口图标
@@ -103,14 +103,15 @@ dist/九州问道/
 ```
 
 启动器从 `data/manifest.json` 找游戏与版本、加载 `assets/`；成功后用 `XIUXIAN_TOKEN`
-启动 `game/gamehost.exe`，宿主加载 `game/playcli.dll`。Go DLL 只依赖系统
-`KERNEL32` / UCRT，不需要额外运行库 DLL。打包需要 MSYS2 的 `gcc`（`make dist` 会自动编 DLL 与宿主）。
+交接令牌，由系统 `rundll32` 加载 `game/gamehost.dll`，宿主再加载 `game/playcli.dll`。Go DLL 只依赖系统
+`KERNEL32` / UCRT，不需要额外运行库 DLL。打包需要 MSYS2 的 `gcc`（`make dist` 会自动编游戏 DLL 与宿主 DLL）。
 个人配置仍在 `%APPDATA%/xiuxian-client/playcli.json`，窗口模式写在 `windowMode`。
 启动器账号库在同目录 `accounts.json`：最多 12 个账号、最近使用置顶；密码只在勾选记住时
 用 Windows DPAPI（本机用户绑定）加密保存，文件里没有明文；删除该文件即清空已存账号。
-启动器只用 `CREATE_NO_WINDOW` 拉起宿主，宿主启动即 `FreeConsole`；不设 `HideWindow`，
+启动器只用 `CREATE_NO_WINDOW` 拉起系统 `rundll32`，宿主 DLL 启动即 `FreeConsole`；不设 `HideWindow`，
 否则宿主第一次 `ShowWindow` 会被强制成隐藏，游戏窗口存在但看不见。登录成功后启动器会等
 子进程的 `JiuzhouWenDao` 窗口真正可见才退出；双击启动器不会多出命令行黑窗。
+发布目录里唯一的 exe 是登录启动器，没有可直接双击的游戏 exe。
 
 ## 键位
 

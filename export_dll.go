@@ -9,7 +9,20 @@ import "C"
 
 import "os"
 
-// RunGame 是 DLL 入口：启动器/宿主把服务器与 token 传进来，游戏以 GUI 模式运行。
+func runFromEnv(server, token string) int {
+	if token != "" {
+		_ = os.Setenv("XIUXIAN_TOKEN", token)
+	}
+	args := []string{"playcli", "--gui"}
+	if server != "" {
+		args = []string{"playcli", "--server", server, "--gui"}
+	}
+	os.Args = args
+	runMain()
+	return 0
+}
+
+// RunGame 是 DLL 入口：gamehost.dll 把服务器与 token 传进来，游戏以 GUI 模式运行。
 //
 //export RunGame
 func RunGame(server *C.char, token *C.char) C.int {
@@ -21,14 +34,5 @@ func RunGame(server *C.char, token *C.char) C.int {
 	if token != nil {
 		t = C.GoString(token)
 	}
-	if t != "" {
-		_ = os.Setenv("XIUXIAN_TOKEN", t)
-	}
-	args := []string{"playcli", "--gui"}
-	if s != "" {
-		args = []string{"playcli", "--server", s, "--gui"}
-	}
-	os.Args = args
-	runMain()
-	return 0
+	return C.int(runFromEnv(s, t))
 }
