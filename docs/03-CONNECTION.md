@@ -2,8 +2,8 @@
 
 ```
 doc_id: C-03
-version: 4.1.1
-updated: 2026-11-23
+version: 4.1.2
+updated: 2026-11-24
 owns: 登录流程、协议版本握手、心搏、重连状态机、关闭码处置、终端生命周期
 depends_on: 服务端 05（P-REST-01/02、P-MSG-01/05、关闭码表）、12（快速开始）
 ```
@@ -12,9 +12,9 @@ depends_on: 服务端 05（P-REST-01/02、P-MSG-01/05、关闭码表）、12（�
 
 ```
 启动
- ├─ 读 config.toml（server / last_name / show_timestamps / token 是否存在）
+ ├─ 读 playcli.json（server / lastName / color）
  ├─ 进备用屏（alternate screen），画登录页
- └─ 有 token 且勾了记住我 → 直接尝试 WS 恢复
+ └─ 登录页等待输入（密码不落盘，不自动恢复 WS）
         │
         ├─ REST 登录     POST /api/login {name, pass} → 200 {token, hasChar}
         │      │
@@ -87,16 +87,16 @@ CONNECTING ──open──► HELLO ──ready──► ONLINE ──close(cod
 
 ## 5. 限流与背压
 
-- `E-RATE` 静默处理：连点时不要弹提示，只把动作置灰到冷却结束。
-- 客户端自带动作冷却表（从 `05` 抄），本地先拦一刀，减少无意义的 `err`。
-- 收到 `err` 且 `code=E-COOLDOWN` 时，用 `extra.retryMs`（若有）或本地表刷新倒计时。
-- 写通道有界（容量 64）：满了就丢弃重复的 `ping`，但**动作帧不允许丢**——丢动作比慢更糟。
+- `E-RATE` 按服务端回执处理：同一窗口最多回一条，收到后把动作置灰到冷却结束。
+- 不内置第二份动作冷却表：以服务端 `err.code=E-COOLDOWN` 为准。
+- 收到 `err` 且 `code=E-COOLDOWN` 时，用 `extra.remainMs` 刷新倒计时。
+- 写通道有界（容量 64）：满了丢弃当前命令（含动作）并提示；不承诺动作必达。
 
 ## 6. 终端生命周期
 
 - **退出**：按 `q`（或 `Ctrl+C`）时发 `{"t":"close"}` 或 WS Close(1000)，最多等 300ms，
   然后 `runtime.shutdown_timeout(200ms)`。不等待也能退出，但服务端会多留一条超时记录。
-- **挂后台**：终端切走后仍按 30ms 轮询；不做省电降频（CPU 占用本就低于 1%）。
+- **挂后台**：终端切走后仍按 250ms 重绘；不做省电降频（CPU 占用本就低于 1%）。
 - **崩溃**：`defer` 里先恢复终端（`term.Restore` + 退出备用屏 + 显示光标），
   再把错误打到 stderr——终端程序不能弹窗，也不该留下一个乱码屏幕。
 

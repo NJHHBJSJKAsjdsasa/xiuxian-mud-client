@@ -2,8 +2,8 @@
 
 ```
 doc_id: C-09
-version: 5.2.1
-updated: 2026-11-23
+version: 5.2.2
+updated: 2026-11-24
 owns: M1–M5 里程碑、每档的完成定义与依赖的协议面
 depends_on: C-01、C-02、C-05、C-08
 ```
@@ -21,7 +21,7 @@ depends_on: C-01、C-02、C-05、C-08
 
 | 项 | 结果 |
 |---|---|
-| 工程 | 20 个 Go 文件：`proto` / `net` / `state` / `app` / `keys` / `screen` / `widgets` / `render` / `pages` / `text` / `theme` / `main` |
+| 工程 | 22 个 Go 文件（15 源码 + 7 测试）：`proto` / `net` / `state` / `app` / `keys` / `screen` / `widgets` / `render` / `pages` / `text` / `theme` / `main` / `vt_windows` / `vt_other` / `config` |
 | 可运行 | `go build -o bin/playcli . && ./bin/playcli --server ws://127.0.0.1:8080`；`--login` / `--create` / `--page` / `--move` / `--snapshot` 为联调参数 |
 | 主循环 | 登录 → 建号 → 仪表盘主界面 → 移动（10s 赶路倒计时）→ 到达刷新；真实服务端实测通过 |
 | 舆图 | 累积已探索节点，按服务端 `x`/`y` 铺在字符网格上，`◎ ● ○` 三态 |
@@ -59,7 +59,7 @@ depends_on: C-01、C-02、C-05、C-08
 **完成定义**
 
 - 三怪场景能按 `1`–`3` 或 `Tab` 选目标；目标死亡自动切下一只；`over` 后出手行禁用。
-- 战报每轮追加一行（约 30ms 一行），`Esc` 可一次补全；跳过不影响状态。
+- 战报每轮追加一行（约 250ms 一行），`Esc` 可一次补全；跳过不影响状态。
 - 秘境掉线 5 分钟内重连能回到同层同进度；清层不自动推进。
 - 团灭与通关的文案、次数变化与服务端一致。
 - 队友血条只在有数据时出现。
@@ -123,7 +123,7 @@ depends_on: C-01、C-02、C-05、C-08
 
 | 档 | 交付 |
 |---|---|
-| M1 | 可运行的 `xiuxian-client.exe` + `Cargo.lock` + 登录/移动冒烟用例 + 主界面快照 |
+| M1 | 可运行的 `playcli.exe` + 登录/移动冒烟用例 + 主界面快照 |
 | M2 | `tests/replay` 战斗帧用例 + 三怪/秘境截图 + 战报样例 |
 | M3 | 表格与曲线的交互用例 + 交易行字段对照表 + 邮件双栏快照 |
 | M4 | 实时切磋的倒计时/超时用例 + 宗门战步骤条快照 |
