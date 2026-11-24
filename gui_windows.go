@@ -153,6 +153,7 @@ type guiApp struct {
 	rows  int
 	cellW int
 	cellH int
+	bezel int
 	minW  int32
 	minH  int32
 
@@ -220,8 +221,8 @@ func runGUI(a *app, _ config) error {
 	// WS_POPUP 默认不进任务栏；补 WS_EX_APPWINDOW，Alt+Tab 与任务栏仍能找到游戏。
 	exStyle := uintptr(wsExAppWindow)
 	var rc windows.Rect
-	rc.Right = int32(110 * gui.cellW)
-	rc.Bottom = int32(34 * gui.cellH)
+	rc.Right = int32(110*gui.cellW + 2*gui.bezel)
+	rc.Bottom = int32(34*gui.cellH + 2*gui.bezel)
 	procAdjustWindowRectEx.Call(uintptr(unsafe.Pointer(&rc)), style, 0, 0)
 
 	hwnd, _, err := procCreateWindowExW.Call(
@@ -286,8 +287,8 @@ func (g *guiApp) windowStyle() uintptr {
 
 func (g *guiApp) computeMinSize() {
 	var minRc windows.Rect
-	minRc.Right = int32(80 * g.cellW)
-	minRc.Bottom = int32(24 * g.cellH)
+	minRc.Right = int32(80*g.cellW + 2*g.bezel)
+	minRc.Bottom = int32(24*g.cellH + 2*g.bezel)
 	procAdjustWindowRectEx.Call(uintptr(unsafe.Pointer(&minRc)), g.windowStyle(), 0, 0)
 	g.minW = minRc.Right - minRc.Left
 	g.minH = minRc.Bottom - minRc.Top
@@ -322,7 +323,7 @@ func (g *guiApp) enforceMinSize() {
 	}
 	var rc windows.Rect
 	procGetClientRect.Call(uintptr(g.hwnd), uintptr(unsafe.Pointer(&rc)))
-	if int(rc.Right) >= 80*g.cellW && int(rc.Bottom) >= 24*g.cellH {
+	if int(rc.Right) >= 80*g.cellW+2*g.bezel && int(rc.Bottom) >= 24*g.cellH+2*g.bezel {
 		return
 	}
 	g.resizing = true
@@ -376,6 +377,11 @@ func (g *guiApp) initFonts() error {
 	}
 	if g.cellW < 4 || g.cellH < 10 {
 		return errors.New("字体度量异常")
+	}
+	// 14px 纯黑外框，DPI 缩放；同时把客户区加大，保证游戏网格不缩水。
+	g.bezel = int(math.Round(14 * scale))
+	if g.bezel < 8 {
+		g.bezel = 8
 	}
 	// 窗口最少 80×24 格（C-05 的最小终端），否则右侧与见闻会被裁掉。
 	g.computeMinSize()
@@ -490,18 +496,23 @@ func (g *guiApp) paint(hdc windows.Handle) {
 	}
 	g.ensureBackBuffer(w, h)
 
-	cols := w / g.cellW
+	contentW := w - 2*g.bezel
+	contentH := h - 2*g.bezel
+	if contentW < g.cellW || contentH < g.cellH {
+		return
+	}
+	cols := contentW / g.cellW
 	if cols < 40 {
 		cols = 40
 	}
-	rows := h / g.cellH
+	rows := contentH / g.cellH
 	if rows < 12 {
 		rows = 12
 	}
 	sc := g.app.render(cols, rows)
 	hash := screenHash(sc)
 	if hash != g.lastHash || cols != g.cols || rows != g.rows || w != g.lastW || h != g.lastH {
-		g.drawScreen(g.hdcMem, sc)
+		g.drawScreen(g.hdcMem, sc, g.bezel, g.bezel, contentW, contentH)
 		g.lastHash, g.cols, g.rows, g.lastW, g.lastH = hash, cols, rows, w, h
 	}
 	procBitBlt.Call(uintptr(hdc), 0, 0, uintptr(w), uintptr(h),
@@ -531,9 +542,12 @@ func callHandle(proc *windows.LazyProc, args ...uintptr) uintptr {
 	return r
 }
 
-func (g *guiApp) drawScreen(hdc windows.Handle, sc *screen) {
+func (g *guiApp) drawScreen(hdc windows.Handle, sc *screen, ox, oy, cw, ch int) {
+	black := windows.Handle(callHandle(procCreateSolidBrush, 0))
+	fill(hdc, 0, 0, g.bmpW, g.bmpH, black)
+	procDeleteObject.Call(uintptr(black))
 	brush := windows.Handle(callHandle(procCreateSolidBrush, uintptr(colorRef(colBG))))
-	fill(hdc, 0, 0, g.bmpW, g.bmpH, brush)
+	fill(hdc, ox, oy, cw, ch, brush)
 	procDeleteObject.Call(uintptr(brush))
 
 	procSetBkMode.Call(uintptr(hdc), transparentBk)
@@ -572,7 +586,7 @@ func (g *guiApp) drawScreen(hdc windows.Handle, sc *screen) {
 			}
 			if st.hasBG {
 				b := windows.Handle(callHandle(procCreateSolidBrush, uintptr(colorRef(st.bg))))
-				fill(hdc, x0*g.cellW, y*g.cellH, (x-x0)*g.cellW, g.cellH, b)
+				fill(hdc, ox+x0*g.cellW, oy+y*g.cellH, (x-x0)*g.cellW, g.cellH, b)
 				procDeleteObject.Call(uintptr(b))
 			}
 			font := g.font
@@ -583,7 +597,7 @@ func (g *guiApp) drawScreen(hdc windows.Handle, sc *screen) {
 			procSetTextColor.Call(uintptr(hdc), uintptr(colorRef(st.fg)))
 			u := utf16.Encode(runes)
 			procExtTextOutW.Call(uintptr(hdc),
-				uintptr(x0*g.cellW), uintptr(y*g.cellH), 0, 0,
+				uintptr(ox+x0*g.cellW), uintptr(oy+y*g.cellH), 0, 0,
 				uintptr(unsafe.Pointer(&u[0])), uintptr(len(u)),
 				uintptr(unsafe.Pointer(&dx[0])))
 		}
@@ -731,6 +745,11 @@ func mouseXY(lparam uintptr) (int, int) {
 
 func (g *guiApp) cellAt(lparam uintptr) (int, int) {
 	x, y := mouseXY(lparam)
+	x -= g.bezel
+	y -= g.bezel
+	if x < 0 || y < 0 {
+		return -1, -1
+	}
 	return x / g.cellW, y / g.cellH
 }
 

@@ -39,6 +39,18 @@ func TestMouseXY(t *testing.T) {
 	}
 }
 
+func TestCellAtAccountsForBezel(t *testing.T) {
+	g := &guiApp{cellW: 10, cellH: 20, bezel: 14}
+	lp := uintptr(24) | uintptr(54)<<16
+	if x, y := g.cellAt(lp); x != 1 || y != 2 {
+		t.Errorf("扣除黑框后应为 (1,2)，实际 (%d,%d)", x, y)
+	}
+	lp = uintptr(5) | uintptr(5)<<16
+	if x, y := g.cellAt(lp); x != -1 || y != -1 {
+		t.Errorf("黑框内的点击应无效，实际 (%d,%d)", x, y)
+	}
+}
+
 func TestWheelKey(t *testing.T) {
 	if wheelKey(120) != "pgup" || wheelKey(-120) != "pgdn" {
 		t.Errorf("滚轮方向映射错误：+120=%s -120=%s", wheelKey(120), wheelKey(-120))
