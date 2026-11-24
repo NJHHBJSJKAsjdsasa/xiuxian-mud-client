@@ -72,19 +72,20 @@ var (
 )
 
 const (
-	wmDestroy     = 0x0002
-	wmSize        = 0x0005
-	wmPaint       = 0x000F
-	wmClose       = 0x0010
-	wmEraseBkgnd  = 0x0014
-	wmKeyDown     = 0x0100
-	wmChar        = 0x0102
-	wmTimer       = 0x0113
-	wmMouseWheel  = 0x020A
-	wmMouseMove   = 0x0200
-	wmLButtonDown = 0x0201
-	wmLButtonUp   = 0x0202
-	wmLButtonDbl  = 0x0203
+	wmDestroy        = 0x0002
+	wmSize           = 0x0005
+	wmPaint          = 0x000F
+	wmClose          = 0x0010
+	wmEraseBkgnd     = 0x0014
+	wmKeyDown        = 0x0100
+	wmChar           = 0x0102
+	wmTimer          = 0x0113
+	wmMouseWheel     = 0x020A
+	wmMouseMove      = 0x0200
+	wmLButtonDown    = 0x0201
+	wmLButtonUp      = 0x0202
+	wmLButtonDbl     = 0x0203
+	wmCaptureChanged = 0x0215
 
 	wsOverlappedWindow = 0x00CF0000
 	wsPopup            = 0x80000000
@@ -169,6 +170,9 @@ type guiApp struct {
 	dragY      int
 	dragPanX   int
 	dragPanY   int
+	moving     bool
+	moveGrabX  int
+	moveGrabY  int
 	resizing   bool
 	skipSpace  bool
 	highSurf   uint16
@@ -457,6 +461,10 @@ func guiWndProc(hwnd uintptr, msg uint32, wparam, lparam uintptr) uintptr {
 		return 0
 	case wmLButtonDbl:
 		gui.onDblClick(lparam)
+		return 0
+	case wmCaptureChanged:
+		gui.moving = false
+		gui.dragging = false
 		return 0
 	case wmClose:
 		procDestroyWindow.Call(hwnd)
@@ -753,7 +761,29 @@ func (g *guiApp) cellAt(lparam uintptr) (int, int) {
 	return x / g.cellW, y / g.cellH
 }
 
+func pointInBezel(x, y, w, h, bezel int) bool {
+	return x < bezel || y < bezel || x >= w-bezel || y >= h-bezel
+}
+
+func draggedWindowPos(winX, winY, grabX, grabY, mouseX, mouseY int) (int, int) {
+	return winX + mouseX - grabX, winY + mouseY - grabY
+}
+
+func (g *guiApp) inBezel(lparam uintptr) bool {
+	x, y := mouseXY(lparam)
+	var rc windows.Rect
+	procGetClientRect.Call(uintptr(g.hwnd), uintptr(unsafe.Pointer(&rc)))
+	return pointInBezel(x, y, int(rc.Right), int(rc.Bottom), g.bezel)
+}
+
 func (g *guiApp) onLButtonDown(lparam uintptr) {
+	if g.inBezel(lparam) {
+		x, y := mouseXY(lparam)
+		g.moving = true
+		g.moveGrabX, g.moveGrabY = x, y
+		procSetCapture.Call(uintptr(g.hwnd))
+		return
+	}
 	if g.mapActive() {
 		x, y := mouseXY(lparam)
 		g.dragging = true
@@ -785,16 +815,30 @@ func (g *guiApp) onWheel(wparam uintptr) {
 }
 
 func (g *guiApp) onMouseMove(lparam uintptr) {
+	x, y := mouseXY(lparam)
+	if g.moving {
+		var wr windows.Rect
+		procGetWindowRect.Call(uintptr(g.hwnd), uintptr(unsafe.Pointer(&wr)))
+		nx, ny := draggedWindowPos(int(wr.Left), int(wr.Top),
+			g.moveGrabX, g.moveGrabY, x, y)
+		procSetWindowPos.Call(uintptr(g.hwnd), 0, uintptr(nx), uintptr(ny), 0, 0,
+			uintptr(swpNoSize|swpNoZOrder|swpNoActivate))
+		return
+	}
 	if !g.dragging {
 		return
 	}
-	x, y := mouseXY(lparam)
 	g.app.ui.mapPanX = g.dragPanX + (x-g.dragX)/g.cellW
 	g.app.ui.mapPanY = g.dragPanY + (y-g.dragY)/g.cellH
 	procInvalidateRect.Call(uintptr(g.hwnd), 0, 0)
 }
 
 func (g *guiApp) onLButtonUp() {
+	if g.moving {
+		g.moving = false
+		procReleaseCapture.Call()
+		return
+	}
 	if !g.dragging {
 		return
 	}
@@ -803,6 +847,9 @@ func (g *guiApp) onLButtonUp() {
 }
 
 func (g *guiApp) onDblClick(lparam uintptr) {
+	if g.inBezel(lparam) {
+		return
+	}
 	if g.mapActive() {
 		g.app.ui.mapPanX, g.app.ui.mapPanY = 0, 0
 	} else {

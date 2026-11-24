@@ -51,6 +51,19 @@ func TestCellAtAccountsForBezel(t *testing.T) {
 	}
 }
 
+func TestBezelDragMath(t *testing.T) {
+	if !pointInBezel(5, 100, 1362, 892, 21) || !pointInBezel(1350, 100, 1362, 892, 21) {
+		t.Error("左右黑框应判定为可拖动区")
+	}
+	if pointInBezel(100, 100, 1362, 892, 21) {
+		t.Error("框内游戏区不应判定为黑框")
+	}
+	x, y := draggedWindowPos(100, 200, 30, 40, 130, 240)
+	if x != 200 || y != 400 {
+		t.Errorf("拖动位移应为 (200,400)，实际 (%d,%d)", x, y)
+	}
+}
+
 func TestWheelKey(t *testing.T) {
 	if wheelKey(120) != "pgup" || wheelKey(-120) != "pgdn" {
 		t.Errorf("滚轮方向映射错误：+120=%s -120=%s", wheelKey(120), wheelKey(-120))
