@@ -8,6 +8,7 @@ static void fail(const char *msg) {
 }
 
 int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmd, int show) {
+    FreeConsole();
     char server[1024] = "";
     char token[4096] = "";
     GetEnvironmentVariableA("XIUXIAN_SERVER", server, (DWORD)sizeof(server));

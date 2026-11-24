@@ -103,6 +103,8 @@ dist/九州问道/
 启动 `game/gamehost.exe`，宿主加载 `game/playcli.dll`。Go DLL 只依赖系统
 `KERNEL32` / UCRT，不需要额外运行库 DLL。打包需要 MSYS2 的 `gcc`（`make dist` 会自动编 DLL 与宿主）。
 个人配置仍在 `%APPDATA%/xiuxian-client/playcli.json`。
+启动器用 `CREATE_NO_WINDOW` + `HideWindow` 拉起宿主，宿主启动即 `FreeConsole`；
+双击启动器不会多出命令行黑窗。
 ```
 
 ## 键位

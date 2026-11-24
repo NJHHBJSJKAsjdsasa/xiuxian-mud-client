@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 	"unsafe"
 
@@ -620,6 +621,8 @@ func (l *launcher) finishAuth(res authOutcome) {
 		return
 	}
 	cmd := exec.Command(game, "--server", server, "--gui")
+	// 即使发布目录被换回旧的 console 程序，也不让它弹黑窗。
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000, HideWindow: true} // CREATE_NO_WINDOW
 	env := make([]string, 0, len(os.Environ())+2)
 	for _, kv := range os.Environ() {
 		if !strings.HasPrefix(kv, "XIUXIAN_TOKEN=") && !strings.HasPrefix(kv, "XIUXIAN_SERVER=") {
