@@ -2,7 +2,7 @@
 
 ```
 doc_id: C-10
-version: 4.3.4
+version: 4.3.5
 updated: 2026-11-24
 owns: 客户端仓的克隆、密钥、日常循环、与服务端的协议同步、构建发布与排错
 depends_on: C-00、C-02、C-03、服务端 docs/05、服务端 docs/13
@@ -131,7 +131,7 @@ gcc -O2 -shared -static -s -o bin/gamehost.dll packaging/gamehost_dll.c         
 | `Permission denied (publickey)` | 用了服务端别名，或部署密钥没加/没勾写权限 | 查 `git remote -v` 与 `ssh -T git@github-client` |
 | 推上去被拒（non-fast-forward） | 远端有新提交 | `git pull --rebase origin main` 后再推 |
 | 连上就被断开（4004） | 客户端 `PROTO` 与服务端不兼容 | 升级客户端；不要改重连逻辑绕过 |
-| 连上就被断开（4003） | token 失效 | 清 token 回登录 |
+| 连上就被断开（4003） | token 失效 / GM 踢人 | 清 token；启动器拉起时关游戏回独立启动器，直接运行游戏显示断开页 |
 | 4001 | 同账号在别处登录 | 提示并停止重连 |
 | `doc-check` 红 | 改了文档没同步矩阵/版本 | 按提示补 `C-00` 行与版本 |
 

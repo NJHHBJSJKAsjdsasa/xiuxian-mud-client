@@ -454,6 +454,9 @@ func main() {
 	l.center()
 	l.loadIcon()
 	l.buildControls()
+	if notice := strings.TrimSpace(os.Getenv("XIUXIAN_NOTICE")); notice != "" {
+		l.setStatus(notice, true)
+	}
 	pShowWindow.Call(hwnd, swShow)
 	pUpdateWindow.Call(hwnd)
 
@@ -903,7 +906,8 @@ func (l *launcher) startGame(token, server string) error {
 	for _, kv := range os.Environ() {
 		if !strings.HasPrefix(kv, "XIUXIAN_TOKEN=") &&
 			!strings.HasPrefix(kv, "XIUXIAN_SERVER=") &&
-			!strings.HasPrefix(kv, "XIUXIAN_LAUNCHER=") {
+			!strings.HasPrefix(kv, "XIUXIAN_LAUNCHER=") &&
+			!strings.HasPrefix(kv, "XIUXIAN_NOTICE=") {
 			env = append(env, kv)
 		}
 	}

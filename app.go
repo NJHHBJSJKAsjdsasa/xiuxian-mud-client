@@ -166,6 +166,18 @@ func (a *app) handleEvent(ev netEvent) {
 				a.ui.toast("连接中断，正在重连…", true)
 			}
 		}
+	case evClosed:
+		a.ui.login.loading = false
+		a.ui.quitMenu = false
+		a.ui.help = false
+		a.ui.talkPick = false
+		a.st.clearSession()
+		notice := sessionEndNotice(e.code, e.reason, e.msg)
+		if a.returnToLauncher(notice) {
+			return
+		}
+		a.ui.fatal = notice
+		a.ui.view = viewFatal
 	case evReady:
 		a.st.applyReady(e.r)
 		a.ui.login.loading = false
@@ -483,7 +495,11 @@ func (a *app) keyMain(k key) {
 	case k.isRune('t'):
 		a.openTalk()
 	case k.isRune('o'):
-		a.confirmTwice("logout", "再按一次 o 退出登录", a.intentLogout)
+		a.confirmTwice("logout", "再按一次 o 退出登录", func() {
+			if !a.returnToLauncher("") {
+				a.intentLogout()
+			}
+		})
 	case k.is("up"), k.isRune('k'):
 		a.moveExit(-1)
 	case k.is("down"), k.isRune('j'):
@@ -575,12 +591,27 @@ func (a *app) chooseQuitMenu() {
 		a.ui.quitMenu = false
 		a.quit = true
 	case 1:
-		if a.returnToLauncher() {
+		if a.returnToLauncher("") {
 			return
 		}
 		a.intentLogout()
 	default:
 		a.ui.quitMenu = false
+	}
+}
+
+func sessionEndNotice(code int, reason, fallback string) string {
+	switch {
+	case code == 4003 && reason == "banned":
+		return "你已被移出此界，游戏已关闭。"
+	case code == 4001:
+		return "账号在别处登录，游戏已关闭。"
+	case code == 4003:
+		return "登录已过期，请重新登录。"
+	case code == 4004:
+		return "客户端与服务端版本不兼容，请更新客户端。"
+	default:
+		return fallback
 	}
 }
 
@@ -598,7 +629,7 @@ func relauncherPath() string {
 
 // returnToLauncher 关闭游戏并重新拉起独立启动器；直接运行游戏时返回 false，
 // 由调用方回退到游戏内登录页。
-func (a *app) returnToLauncher() bool {
+func (a *app) returnToLauncher(notice string) bool {
 	if a.launcherPath == "" {
 		return false
 	}
@@ -608,10 +639,14 @@ func (a *app) returnToLauncher() bool {
 	for _, kv := range os.Environ() {
 		if strings.HasPrefix(kv, "XIUXIAN_TOKEN=") ||
 			strings.HasPrefix(kv, "XIUXIAN_SERVER=") ||
-			strings.HasPrefix(kv, "XIUXIAN_LAUNCHER=") {
+			strings.HasPrefix(kv, "XIUXIAN_LAUNCHER=") ||
+			strings.HasPrefix(kv, "XIUXIAN_NOTICE=") {
 			continue
 		}
 		env = append(env, kv)
+	}
+	if notice != "" {
+		env = append(env, "XIUXIAN_NOTICE="+notice)
 	}
 	cmd.Env = env
 	if err := cmd.Start(); err != nil {

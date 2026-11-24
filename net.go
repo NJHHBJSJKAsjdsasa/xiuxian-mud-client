@@ -97,6 +97,11 @@ type evPresence struct{ n int64 }
 type evBattle struct{ b *battleView }
 type evEvent struct{ e *eventView }
 type evErr struct{ code, msg string }
+type evClosed struct {
+	code   int
+	reason string
+	msg    string
+}
 type evAnnounce struct{ text string }
 
 // httpBase 把 ws:// 转成 http://，缺协议时补 http://。
@@ -266,7 +271,7 @@ func runNet(cmds <-chan netCmd, evs chan<- netEvent) {
 					if end.reason != "" {
 						msg = fmt.Sprintf("%s（%d %s）", msg, end.code, end.reason)
 					}
-					send(evStatus{connStatus{kind: connOffline, detail: msg}})
+					send(evClosed{code: end.code, reason: end.reason, msg: msg})
 					break
 				}
 				attempt++
