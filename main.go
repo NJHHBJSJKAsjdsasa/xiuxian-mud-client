@@ -35,6 +35,8 @@ type args struct {
 	explore  int
 	keys     string
 	wait     int
+	gui      bool
+	tui      bool
 	hasMove  bool
 	snapshot string
 	color    string
@@ -52,6 +54,8 @@ func parseArgs() args {
 	flag.IntVar(&a.explore, "explore", 0, "进主界面后自动历练 n 次（间隔 1.5 秒，联调用）")
 	flag.StringVar(&a.keys, "keys", "", "快照前模拟按键（逗号分隔）：f2,down,enter；单字符直接写，如 ? 或 /")
 	flag.IntVar(&a.wait, "wait", 0, "进主界面后再等 n 秒（等赶路到达、等战斗结算）")
+	flag.BoolVar(&a.gui, "gui", false, "打开桌面窗口（Windows；支持鼠标拖舆图）")
+	flag.BoolVar(&a.tui, "tui", false, "强制终端界面（双击 exe 默认开桌面窗口）")
 	flag.StringVar(&a.snapshot, "snapshot", "", "离屏渲染一屏到文件后退出")
 	flag.StringVar(&a.color, "color", "", "颜色：true|256|off")
 	flag.IntVar(&a.width, "w", 110, "快照宽度（列）")
@@ -113,10 +117,28 @@ func main() {
 		}
 		return
 	}
+	// 双击 exe（独占控制台）时默认开桌面窗口：有原生边框，舆图能拖。
+	// 从 cmd / 终端 / Windows Terminal 启动时仍是 TUI；--gui / --tui 可强制。
+	if argv.gui || (!argv.tui && autoGUI()) {
+		if err := runGUI(a, cfg); err == nil {
+			return
+		} else if argv.gui {
+			fmt.Fprintln(os.Stderr, "桌面窗口启动失败，改用终端界面：", err)
+		}
+	}
 	if err := runTUI(a, mode); err != nil {
 		fmt.Fprintln(os.Stderr, "无法启动界面：", err)
 		os.Exit(1)
 	}
+}
+
+// autoGUI 只在"双击 exe、独占控制台"时返回真。Windows Terminal / VS Code
+// 的 ConPTY 里进程数也可能是 1，必须再用环境变量排除，否则从终端启动会突然开窗。
+func autoGUI() bool {
+	if !consoleOwned() {
+		return false
+	}
+	return os.Getenv("WT_SESSION") == "" && os.Getenv("TERM_PROGRAM") == ""
 }
 
 // runTUI 进入全屏界面。管道/CI 里不要调用它。

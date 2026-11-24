@@ -193,6 +193,8 @@ func (a *app) handleEvent(ev netEvent) {
 		// 都不该把玩家刚选好的去处打回第一项。
 		if e.m.Loc != oldLoc {
 			a.ui.selectedExit = 0
+			// 换了节点就重新居中：还留着上一个节点的平移会让人找不到自己。
+			a.ui.mapPanX, a.ui.mapPanY = 0, 0
 		}
 		if a.pendingMove != nil {
 			i := *a.pendingMove
@@ -727,6 +729,8 @@ func (a *app) keyPage(k key) {
 			}
 		case k.isRune('l'):
 			a.intentLook()
+		case k.isRune('0'):
+			a.ui.mapPanX, a.ui.mapPanY = 0, 0
 		}
 	}
 }

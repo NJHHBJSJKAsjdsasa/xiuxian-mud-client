@@ -2,8 +2,8 @@
 
 ```
 doc_id: C-10
-version: 4.1.2
-updated: 2026-11-23
+version: 4.2.0
+updated: 2026-11-24
 owns: 客户端仓的克隆、密钥、日常循环、与服务端的协议同步、构建发布与排错
 depends_on: C-00、C-02、C-03、服务端 docs/05、服务端 docs/13
 ```
@@ -93,7 +93,7 @@ GOOS=darwin  GOARCH=arm64 go build -ldflags "-s -w" -o bin/playcli .
 
 | 平台 | 产物 | 备注 |
 |---|---|---|
-| Windows | `playcli.exe`（约 3–5MB） | 控制台程序；双击用 `cmd`/Windows Terminal 打开，或从终端里跑 |
+| Windows | `playcli.exe`（约 6MB） | 双击默认开桌面窗口；`--tui` 保持终端，`--gui` 强制窗口 |
 | macOS | `playcli`（单二进制） | 未签名时首次运行需在「隐私与安全性」里放行，或 `xattr -dr com.apple.quarantine` |
 | Linux | `playcli`（单二进制） | 可选放一个 `.desktop` 启动器，只为从菜单里打开终端跑它 |
 

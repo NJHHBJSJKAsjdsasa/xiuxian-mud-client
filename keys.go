@@ -271,6 +271,11 @@ type uiState struct {
 	// 与人物交谈的弹层。
 	talkPick bool
 	talkSel  int
+	// 舆图平移（格）：桌面版鼠标拖动，TUI 里按 0 回中。
+	mapPanX int
+	mapPanY int
+	// 桌面窗口模式：舆图页多显示"拖动平移"的提示。
+	desktop bool
 	// 需要按两次才执行的动作（quit / logout）与第一次按下的时刻。
 	confirm   string
 	confirmAt int64

@@ -35,7 +35,7 @@ func (a *app) drawMap(sc *screen, x, y, w, h int) {
 	if scale < 0.02 {
 		scale = 0.02
 	}
-	cx, cy := x+w/2, y+h/2
+	cx, cy := x+w/2+a.ui.mapPanX, y+h/2+a.ui.mapPanY
 	pos := func(px, py float64) (int, int) {
 		return cx + int(math.Round(px*scale)), cy + int(math.Round(py*scale*0.5))
 	}
@@ -97,6 +97,11 @@ func (a *app) drawMap(sc *screen, x, y, w, h int) {
 	}
 
 	legend := fmt.Sprintf("◎ 当前   ● 到过   ○ 只是望见    已记 %d 处", len(g.nodes))
+	if a.ui.mapPanX != 0 || a.ui.mapPanY != 0 {
+		legend += "    （0 回中）"
+	} else if a.ui.desktop {
+		legend += "    拖动平移 · 双击回中"
+	}
 	sc.put(x, y+h-1, truncateWidth(legend, w), fg(colFaint))
 }
 

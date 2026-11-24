@@ -2,7 +2,7 @@
 
 ```
 doc_id: C-02
-version: 5.0.3
+version: 5.1.0
 updated: 2026-11-24
 owns: 技术选型、依赖、分层、目录结构、并发模型、模块依赖规则
 depends_on: C-01、C-03、C-04、C-05
@@ -37,7 +37,7 @@ depends_on: C-01、C-03、C-04、C-05
 |---|---|---|
 | `golang.org/x/term` | raw mode、窗口尺寸 | 唯一与终端模式相关的依赖 |
 | `github.com/gorilla/websocket` | WS 长连接 | 成熟、无额外依赖 |
-| `golang.org/x/sys`（间接） | Windows 控制台 VT 开关 | 只用到 `SetConsoleMode` |
+| `golang.org/x/sys` | 控制台 VT 开关；Windows 桌面窗口的 user32/gdi32/kernel32 调用 | 不是 TUI 框架；只调系统 API |
 | 标准库 | HTTP、JSON、时间、数学 | REST 与序列化不引第三方 |
 
 **没有 TUI 框架**（不引 tview / bubbletea / termui）：布局、边框、量表、按键
@@ -62,11 +62,13 @@ client/
 ├── pages.go         数据页（角色/背包/技能/宗门/舆图/设置）
 ├── text.go          显示宽度、截断、补齐、千分位、时间格式
 ├── theme.go         调色板、日志色、方位箭头
+├── gui_windows.go   Windows 桌面窗口：Win32/GDI 双缓冲、DPI、鼠标拖舆图
+├── gui_other.go     非 Windows：runGUI 返回不支持
 ├── vt_windows.go    Windows 控制台开 VT
 ├── vt_other.go      Unix 空实现
 ├── docs/            设计文档（本目录）
 ├── tools/doc-check.py  文档自查
-└── *_test.go        111 项单测
+└── *_test.go        115 项单测
 ```
 
 ## 4. 并发模型
@@ -78,6 +80,9 @@ client/
 - **读 goroutine**：`wsSession` 里单独起一个只做 `ReadMessage` 的协程，把结果投进
   channel；会话结束时关闭 `done`，读协程立刻退出，不留僵尸。
 - **两条通道**：命令 `chan netCmd`（缓冲 64）、事件 `chan netEvent`（缓冲 2048）；
+- **桌面窗口**：GUI 线程 `runtime.LockOSThread` 跑 Win32 消息循环，250ms `WM_TIMER`
+  里执行同一个 `drain → tick → render`；键盘/鼠标消息转换成同一套 `key` 与 `uiState`，
+  不引入第二套状态机。所有 GDI 句柄都在该线程创建与释放。
   事件投递用 `select/default`，满了丢弃——界面每 250ms 重绘，丢一条不会卡住网络。
 - 断线重连在**网络 goroutine** 里退避，主循环只把状态画成"重连 5s"。
 

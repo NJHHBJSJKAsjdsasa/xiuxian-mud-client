@@ -2,7 +2,7 @@
 
 ```
 doc_id: C-09
-version: 5.2.2
+version: 5.3.0
 updated: 2026-11-24
 owns: M1–M5 里程碑、每档的完成定义与依赖的协议面
 depends_on: C-01、C-02、C-05、C-08
@@ -17,15 +17,16 @@ depends_on: C-01、C-02、C-05、C-08
 
 ## 2. M1 · 终端骨架与主循环
 
-**状态：已完成（2026-11-23，Go 重写）**。落地内容与实测：
+**状态：已完成（2026-11-23，Go 重写；2026-11-24 补 Windows 桌面窗口）**。落地内容与实测：
 
 | 项 | 结果 |
 |---|---|
-| 工程 | 22 个 Go 文件（15 源码 + 7 测试）：`proto` / `net` / `state` / `app` / `keys` / `screen` / `widgets` / `render` / `pages` / `text` / `theme` / `main` / `vt_windows` / `vt_other` / `config` |
-| 可运行 | `go build -o bin/playcli . && ./bin/playcli --server ws://127.0.0.1:8080`；`--login` / `--create` / `--page` / `--move` / `--snapshot` 为联调参数 |
+| 工程 | 24 个 Go 文件（17 源码 + 7 测试）：`proto` / `net` / `state` / `app` / `keys` / `screen` / `widgets` / `render` / `pages` / `text` / `theme` / `main` / `config` / `vt_windows` / `vt_other` / `gui_windows` / `gui_other` |
+| 可运行 | `go build -o bin/playcli . && ./bin/playcli --server ws://127.0.0.1:8080`；`--login` / `--create` / `--page` / `--move` / `--snapshot` / `--gui` / `--tui` 为联调参数 |
 | 主循环 | 登录 → 建号 → 仪表盘主界面 → 移动（10s 赶路倒计时）→ 到达刷新；真实服务端实测通过 |
 | 舆图 | 累积已探索节点，按服务端 `x`/`y` 铺在字符网格上，`◎ ● ○` 三态 |
-| 质量门 | `go vet` 干净；`go test` 111 项全绿；`doc-check` 11 份一致 |
+| 质量门 | `go vet` 干净；`go test` 115 项全绿；`doc-check` 11 份一致 |
+| 桌面窗口 | Windows 双击 exe 默认开窗；DPI 感知、GDI 双缓冲、最小 80×24、鼠标拖舆图/双击回中；实机截图登录/主界面/背包/舆图 |
 | 已知边界 | 历练/突破按服务端境界限制会被拒（凡人不能在中州历练），客户端如实显示 `E-NOREALM` |
 
 **工程**：`go.mod`（仅 websocket + term）、`proto.go` 全部帧类型、`net.go` 握手与重连、
@@ -123,8 +124,8 @@ depends_on: C-01、C-02、C-05、C-08
 
 | 档 | 交付 |
 |---|---|
-| M1 | 可运行的 `playcli.exe` + 登录/移动冒烟用例 + 主界面快照 |
+| M1 | 可运行的 `playcli.exe`（双击桌面窗口 / `--tui` 终端）+ 登录/移动冒烟用例 + 主界面快照 |
 | M2 | `tests/replay` 战斗帧用例 + 三怪/秘境截图 + 战报样例 |
 | M3 | 表格与曲线的交互用例 + 交易行字段对照表 + 邮件双栏快照 |
 | M4 | 实时切磋的倒计时/超时用例 + 宗门战步骤条快照 |
-| M5 | 三平台产物 + 性能记录（RSS/帧时/待机 CPU）+ 浅底配色与多尺寸快照 |
+| M5 | Windows 窗口 + macOS/Linux 终端产物 + 性能记录（RSS/帧时/待机 CPU）+ 浅底配色与多尺寸快照 |

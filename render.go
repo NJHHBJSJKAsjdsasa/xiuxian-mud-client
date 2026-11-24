@@ -635,7 +635,7 @@ func (a *app) pageHint() string {
 	case pageMarket:
 		return "↑↓ 选择   +/- 数量   Enter 买入   [ ] 翻页   Esc 返回"
 	case pageMap:
-		return "Enter 刷新   l 看四周   [ ] 翻页   Esc 返回"
+		return "Enter 刷新   l 看四周   0 回中   [ ] 翻页   Esc 返回"
 	default:
 		return "/ 说话   [ ] 翻页   ? 帮助   Esc 返回"
 	}
