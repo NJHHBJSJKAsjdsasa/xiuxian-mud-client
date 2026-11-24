@@ -45,7 +45,7 @@ func (a *app) render(w, h int) *screen {
 	}
 	drawToast(sc, &a.ui)
 	if a.ui.quitMenu && a.ui.view == viewMain {
-		drawQuitMenu(sc, a.ui.quitSel)
+		drawQuitMenu(sc, a.ui.quitSel, a.launcherPath != "")
 	}
 	return sc
 }
@@ -1002,8 +1002,8 @@ func drawEncounter(sc *screen, e *eventView) {
 	sc.put(ix, y+h-2, "按 1–"+itoa(len(e.Options))+" 选择", fg(colFaint))
 }
 
-// drawQuitMenu 离开菜单：q 打开，退出游戏 / 返回登录界面 / 取消。
-func drawQuitMenu(sc *screen, sel int) {
+// drawQuitMenu 离开菜单：q 打开，退出游戏 / 返回登录窗口 / 取消。
+func drawQuitMenu(sc *screen, sel int, hasLauncher bool) {
 	w, h := 42, 8
 	if w > sc.w-4 {
 		w = sc.w - 4
@@ -1026,7 +1026,11 @@ func drawQuitMenu(sc *screen, sel int) {
 	}
 	box(sc, x, y, w, h, "离开游戏", true)
 	ix, iw := boxInner(x, w)
-	options := []string{"退出游戏", "返回登录界面", "取消"}
+	login := "返回登录界面"
+	if hasLauncher {
+		login = "返回登录窗口"
+	}
+	options := []string{"退出游戏", login, "取消"}
 	for i, label := range options {
 		ry := y + 2 + i
 		line := fmt.Sprintf("%d  %s", i+1, label)

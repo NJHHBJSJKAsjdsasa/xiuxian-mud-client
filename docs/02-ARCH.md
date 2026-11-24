@@ -2,7 +2,7 @@
 
 ```
 doc_id: C-02
-version: 5.3.1
+version: 5.3.2
 updated: 2026-11-24
 owns: 技术选型、依赖、分层、目录结构、并发模型、模块依赖规则
 depends_on: C-01、C-03、C-04、C-05
@@ -73,7 +73,7 @@ client/
 ├── packaging/       发布目录组装脚本与 README
 ├── docs/            设计文档（本目录）
 ├── tools/doc-check.py  文档自查
-└── *_test.go        142 项单测
+└── *_test.go        143 项单测
 ```
 
 ## 4. 并发模型
@@ -90,6 +90,8 @@ client/
   最近使用置顶；成功后按清单里的 `game` 路径以 `CREATE_NO_WINDOW` 启动宿主
   `game/gamehost.exe`（宿主启动即 `FreeConsole`），宿主用 `LoadLibrary` 加载同目录
   `game/playcli.dll` 并调用导出的 `RunGame`；token 走 `XIUXIAN_TOKEN` 环境变量，密码不进入命令行。
+  启动器同时把自身路径写入 `XIUXIAN_LAUNCHER`；游戏里选“返回登录窗口”时关闭游戏并重启该启动器，
+  没有该变量时回退到游戏内登录页。
   启动器不设 `HideWindow`，它会让宿主第一次 `ShowWindow` 被强制成 `SW_HIDE`；拉起后轮询
   子进程的可见 `JiuzhouWenDao` 窗口，窗口可见才退出，进程提前退出或超时则保留启动器报错。
 - **桌面窗口**：GUI 线程 `runtime.LockOSThread` 跑 Win32 消息循环，250ms `WM_TIMER`

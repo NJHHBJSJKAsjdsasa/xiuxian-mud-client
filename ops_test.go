@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -383,6 +384,26 @@ func TestQuitMenuCanReturnToLogin(t *testing.T) {
 	}
 	if a.ui.quitMenu {
 		t.Fatal("执行后应关闭离开菜单")
+	}
+}
+
+func TestRelauncherPath(t *testing.T) {
+	t.Setenv("XIUXIAN_LAUNCHER", "")
+	if got := relauncherPath(); got != "" {
+		t.Fatalf("空环境应返回空路径，实为 %q", got)
+	}
+	f, err := os.CreateTemp(t.TempDir(), "launcher-*.exe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	t.Setenv("XIUXIAN_LAUNCHER", f.Name())
+	if got := relauncherPath(); got != f.Name() {
+		t.Fatalf("应识别存在的启动器，实为 %q", got)
+	}
+	t.Setenv("XIUXIAN_LAUNCHER", f.Name()+".missing")
+	if got := relauncherPath(); got != "" {
+		t.Fatalf("不存在的启动器应返回空路径，实为 %q", got)
 	}
 }
 

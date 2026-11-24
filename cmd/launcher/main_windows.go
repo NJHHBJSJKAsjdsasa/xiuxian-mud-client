@@ -896,13 +896,19 @@ func (l *launcher) startGame(token, server string) error {
 	}
 	cmd := exec.Command(game, "--server", server, "--gui")
 	cmd.SysProcAttr = gameProcessAttrs()
-	env := make([]string, 0, len(os.Environ())+2)
+	env := make([]string, 0, len(os.Environ())+3)
 	for _, kv := range os.Environ() {
-		if !strings.HasPrefix(kv, "XIUXIAN_TOKEN=") && !strings.HasPrefix(kv, "XIUXIAN_SERVER=") {
+		if !strings.HasPrefix(kv, "XIUXIAN_TOKEN=") &&
+			!strings.HasPrefix(kv, "XIUXIAN_SERVER=") &&
+			!strings.HasPrefix(kv, "XIUXIAN_LAUNCHER=") {
 			env = append(env, kv)
 		}
 	}
-	cmd.Env = append(env, "XIUXIAN_TOKEN="+token, "XIUXIAN_SERVER="+server)
+	env = append(env, "XIUXIAN_TOKEN="+token, "XIUXIAN_SERVER="+server)
+	if launcherExe, err := os.Executable(); err == nil {
+		env = append(env, "XIUXIAN_LAUNCHER="+launcherExe)
+	}
+	cmd.Env = env
 	cmd.Dir = filepath.Dir(game)
 	if err := cmd.Start(); err != nil {
 		return err

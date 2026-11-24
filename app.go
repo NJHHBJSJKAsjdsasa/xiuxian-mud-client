@@ -2,6 +2,9 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -24,6 +27,9 @@ type app struct {
 	cmds chan netCmd
 	evs  chan netEvent
 
+	// 由启动器拉起时，退出到登录窗口需要重新打开的原生启动器路径。
+	launcherPath string
+
 	submitAt      int64
 	pendingLogin  *loginAttempt
 	pendingCreate string
@@ -45,11 +51,12 @@ func newApp(cfg config) *app {
 	cmds := make(chan netCmd, 64)
 	evs := make(chan netEvent, 2048)
 	a := &app{
-		st:   newAppState(),
-		ui:   newUIState(cfg.Server),
-		cfg:  cfg,
-		cmds: cmds,
-		evs:  evs,
+		st:           newAppState(),
+		ui:           newUIState(cfg.Server),
+		cfg:          cfg,
+		cmds:         cmds,
+		evs:          evs,
+		launcherPath: relauncherPath(),
 	}
 	a.ui.login.name = cfg.LastName
 	if a.ui.login.name == "" {
@@ -568,10 +575,55 @@ func (a *app) chooseQuitMenu() {
 		a.ui.quitMenu = false
 		a.quit = true
 	case 1:
+		if a.returnToLauncher() {
+			return
+		}
 		a.intentLogout()
 	default:
 		a.ui.quitMenu = false
 	}
+}
+
+func relauncherPath() string {
+	path := strings.TrimSpace(os.Getenv("XIUXIAN_LAUNCHER"))
+	if path == "" {
+		return ""
+	}
+	st, err := os.Stat(path)
+	if err != nil || st.IsDir() {
+		return ""
+	}
+	return path
+}
+
+// returnToLauncher 关闭游戏并重新拉起独立启动器；直接运行游戏时返回 false，
+// 由调用方回退到游戏内登录页。
+func (a *app) returnToLauncher() bool {
+	if a.launcherPath == "" {
+		return false
+	}
+	cmd := exec.Command(a.launcherPath)
+	cmd.Dir = filepath.Dir(a.launcherPath)
+	env := make([]string, 0, len(os.Environ()))
+	for _, kv := range os.Environ() {
+		if strings.HasPrefix(kv, "XIUXIAN_TOKEN=") ||
+			strings.HasPrefix(kv, "XIUXIAN_SERVER=") ||
+			strings.HasPrefix(kv, "XIUXIAN_LAUNCHER=") {
+			continue
+		}
+		env = append(env, kv)
+	}
+	cmd.Env = env
+	if err := cmd.Start(); err != nil {
+		return false
+	}
+	_ = cmd.Process.Release()
+	a.send(netCmd{kind: cmdLogout})
+	a.st.clearSession()
+	a.ui.quitMenu = false
+	a.ui.quitSel = 0
+	a.quit = true
+	return true
 }
 
 // confirmTwice 两段确认：第一次只提示，2.5 秒内再按一次才执行。
