@@ -80,6 +80,7 @@ const (
 	wmKeyDown     = 0x0100
 	wmChar        = 0x0102
 	wmTimer       = 0x0113
+	wmMouseWheel  = 0x020A
 	wmMouseMove   = 0x0200
 	wmLButtonDown = 0x0201
 	wmLButtonUp   = 0x0202
@@ -397,6 +398,9 @@ func guiWndProc(hwnd uintptr, msg uint32, wparam, lparam uintptr) uintptr {
 	case wmChar:
 		gui.onChar(uint32(wparam))
 		return 0
+	case wmMouseWheel:
+		gui.onWheel(wparam)
+		return 0
 	case wmMouseMove:
 		gui.onMouseMove(lparam)
 		return 0
@@ -618,7 +622,7 @@ func (g *guiApp) onChar(ch uint32) {
 		procInvalidateRect.Call(uintptr(g.hwnd), 0, 0)
 		return
 	}
-	if ch < 0x20 {
+	if ch < 0x20 || ch == 0x7F {
 		return
 	}
 	if ch >= 0xD800 && ch <= 0xDBFF {
@@ -657,6 +661,8 @@ func vkToKey(vk uint32) (key, bool) {
 		return special("tab"), true
 	case 0x08:
 		return special("backspace"), true
+	case 0x2E:
+		return special("delete"), true
 	case 0x20:
 		return special("space"), true
 	case 0x21:
@@ -693,6 +699,23 @@ func (g *guiApp) onLButtonDown(lparam uintptr) {
 	g.dragX, g.dragY = x, y
 	g.dragPanX, g.dragPanY = g.app.ui.mapPanX, g.app.ui.mapPanY
 	procSetCapture.Call(uintptr(g.hwnd))
+}
+
+// wheelKey 把滚轮方向翻成日志/列表用的翻页键。
+func wheelKey(delta int16) string {
+	if delta < 0 {
+		return "pgdn"
+	}
+	return "pgup"
+}
+
+func (g *guiApp) onWheel(wparam uintptr) {
+	delta := int16((wparam >> 16) & 0xFFFF)
+	if delta == 0 {
+		return
+	}
+	g.app.onKey(special(wheelKey(delta)))
+	procInvalidateRect.Call(uintptr(g.hwnd), 0, 0)
 }
 
 func (g *guiApp) onMouseMove(lparam uintptr) {

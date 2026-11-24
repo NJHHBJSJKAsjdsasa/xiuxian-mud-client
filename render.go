@@ -72,9 +72,9 @@ func drawLogin(sc *screen, ui *uiState) {
 	sc.put(ix, rowY+1, "云端存档 · 服务端权威", fg(colDim))
 	rowY += 3
 
-	fieldRow(sc, ix, rowY, iw, "服务器", l.server, l.focus == 0, "ws://127.0.0.1:8080")
-	fieldRow(sc, ix, rowY+1, iw, "道号", l.name, l.focus == 1, "2–8 个字符")
-	fieldRow(sc, ix, rowY+2, iw, "密码", maskPass(l.pass), l.focus == 2, "6–32 个字符")
+	fieldRow(sc, ix, rowY, iw, "服务器", l.server, l.serverCur, l.focus == 0, "ws://127.0.0.1:8080")
+	fieldRow(sc, ix, rowY+1, iw, "道号", l.name, l.nameCur, l.focus == 1, "2–8 个字符")
+	fieldRow(sc, ix, rowY+2, iw, "密码", maskPass(l.pass), l.passCur, l.focus == 2, "6–32 个字符")
 	rowY += 4
 
 	mode := "登录"
@@ -99,7 +99,24 @@ func drawLogin(sc *screen, ui *uiState) {
 }
 
 // fieldRow 一行输入框：标签占固定列，聚焦时括号与光标提亮。
-func fieldRow(sc *screen, x, y, w int, label, value string, focused bool, hint string) {
+// putCursorText 画一段带光标的输入文本：光标占一列，前后的字按显示宽度截断。
+func putCursorText(sc *screen, x, y, avail int, text string, cur int, st style) int {
+	if avail <= 0 {
+		return x
+	}
+	rs := []rune(text)
+	pos := clampPos(cur, 0, len(rs))
+	before := truncateWidth(string(rs[:pos]), max(0, avail-1))
+	x = sc.put(x, y, before, st)
+	x = sc.put(x, y, "▌", fg(colAccent))
+	left := max(0, avail-1-textWidth(before))
+	if left > 0 {
+		x = sc.put(x, y, truncateWidth(string(rs[pos:]), left), st)
+	}
+	return x
+}
+
+func fieldRow(sc *screen, x, y, w int, label, value string, cur int, focused bool, hint string) {
 	lbl := fg(colDim)
 	brk := fg(colFaint)
 	if focused {
@@ -110,13 +127,20 @@ func fieldRow(sc *screen, x, y, w int, label, value string, focused bool, hint s
 	sc.put(x, y, padWidth(label, used), lbl)
 	cx := sc.put(x+used, y, "[", brk)
 	avail := w - used - 4
-	text := value
-	st := fg(colText)
+	if focused {
+		if value == "" {
+			end := sc.put(cx+1, y, "▌", fg(colAccent))
+			end = sc.put(end, y, truncateWidth(hint, max(0, avail-1)), fg(colFaint))
+			sc.put(end, y, " ]", brk)
+			return
+		}
+		end := putCursorText(sc, cx+1, y, avail, value, cur, fg(colText))
+		sc.put(end, y, " ]", brk)
+		return
+	}
+	text, st := value, fg(colText)
 	if text == "" {
 		text, st = hint, fg(colFaint)
-	}
-	if focused {
-		text += "▌"
 	}
 	cx = sc.put(cx+1, y, truncateWidth(text, avail), st)
 	sc.put(cx, y, " ]", brk)
@@ -127,7 +151,7 @@ func drawCreate(sc *screen, ui *uiState) {
 	ix, iw := boxInner(x, 48)
 	sc.put(ix, y+2, "踏入凡界", fgBold(colAccent))
 	sc.put(ix, y+3, "测灵石摆在案上，还空着。", fg(colDim))
-	fieldRow(sc, ix, y+5, iw, "道号", ui.createName, true, "2–8 个字符")
+	fieldRow(sc, ix, y+5, iw, "道号", ui.createName, ui.createCur, true, "2–8 个字符")
 	sc.put(ix, y+7, "Enter 落笔   Ctrl+C 退出", fg(colFaint))
 }
 
@@ -567,8 +591,7 @@ func (a *app) drawHint(sc *screen, y int) {
 		prompt := a.ui.chatPrompt()
 		x := sc.put(1, y, prompt, st)
 		room := sc.w - 2 - tw - 2 - textWidth(prompt)
-		x = sc.put(x, y, truncateWidth(a.ui.chatText, max(0, room)), st)
-		sc.put(x, y, "▌", st)
+		putCursorText(sc, x, y, max(0, room), a.ui.chatText, a.ui.chatCur, st)
 		sc.put(sc.w-tw-1, y, tip, style{fg: colBG, bg: colPanel, hasBG: true})
 		return
 	}

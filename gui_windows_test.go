@@ -39,6 +39,12 @@ func TestMouseXY(t *testing.T) {
 	}
 }
 
+func TestWheelKey(t *testing.T) {
+	if wheelKey(120) != "pgup" || wheelKey(-120) != "pgdn" {
+		t.Errorf("滚轮方向映射错误：+120=%s -120=%s", wheelKey(120), wheelKey(-120))
+	}
+}
+
 func TestGDIRuneFallback(t *testing.T) {
 	cases := map[rune]rune{'▸': '»', '░': '·', '中': '中', '█': '█'}
 	for in, want := range cases {

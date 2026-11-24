@@ -99,6 +99,8 @@ func parseKeys(buf []byte) []key {
 						switch num {
 						case 1, 7:
 							out = append(out, special("home"))
+						case 3:
+							out = append(out, special("delete"))
 						case 4, 8:
 							out = append(out, special("end"))
 						case 5:
@@ -232,13 +234,36 @@ func pageFromFn(name string) (page, bool) {
 }
 
 type loginForm struct {
-	server   string
-	name     string
-	pass     string
-	register bool
-	loading  bool
-	err      string
-	focus    int
+	server    string
+	name      string
+	pass      string
+	serverCur int
+	nameCur   int
+	passCur   int
+	register  bool
+	loading   bool
+	err       string
+	focus     int
+}
+
+// syncCursors 把三个光标都落到各自文本末尾；用于配置回填与自动登录。
+func (f *loginForm) syncCursors() {
+	f.serverCur = len([]rune(f.server))
+	f.nameCur = len([]rune(f.name))
+	f.passCur = len([]rune(f.pass))
+}
+
+// setFocus 切换登录表单焦点：新字段的光标落到末尾，避免在开头插字。
+func (f *loginForm) setFocus(i int) {
+	f.focus = i
+	switch i {
+	case 0:
+		f.serverCur = len([]rune(f.server))
+	case 1:
+		f.nameCur = len([]rune(f.name))
+	default:
+		f.passCur = len([]rune(f.pass))
+	}
 }
 
 type toast struct {
@@ -253,9 +278,11 @@ type uiState struct {
 	page         page
 	login        loginForm
 	createName   string
+	createCur    int
 	chatCh       string
 	chatTo       string
 	chatText     string
+	chatCur      int
 	typing       bool
 	selectedExit int
 	target       int // 战斗中选中的敌方序号（1 起，对应 battle.foes[].i）
@@ -279,13 +306,15 @@ type uiState struct {
 	// 需要按两次才执行的动作（quit / logout）与第一次按下的时刻。
 	confirm   string
 	confirmAt int64
-	// 输入行的历史：↑ 翻旧、↓ 回新。
-	inputHist []string
-	inputAt   int
+	// 输入行的历史：↑ 翻旧、↓ 回新；草稿在离开最新端时保存。
+	inputHist   []string
+	inputAt     int
+	histDraft   string
+	histDraftAt int
 }
 
 func newUIState(server string) uiState {
-	return uiState{
+	ui := uiState{
 		view: viewLogin,
 		page: pageGame,
 		login: loginForm{
@@ -296,6 +325,8 @@ func newUIState(server string) uiState {
 		target:  1,
 		shopQty: 1,
 	}
+	ui.login.syncCursors()
+	return ui
 }
 
 // selOf / setSel 读写某页的列表光标。
@@ -332,10 +363,14 @@ func (u *uiState) rememberInput(text string) {
 	u.inputAt = len(u.inputHist)
 }
 
-// histStep 在输入历史里上/下翻：d=-1 更旧，d=+1 更新。翻到末尾就是空行。
+// histStep 在输入历史里上/下翻：d=-1 更旧，d=+1 更新。
+// 离开最新端时把当前草稿存起来，翻回末尾再还原，打一半的命令不会被历史顶掉。
 func (u *uiState) histStep(d int) {
 	if len(u.inputHist) == 0 {
 		return
+	}
+	if u.inputAt == len(u.inputHist) && d < 0 {
+		u.histDraft, u.histDraftAt = u.chatText, u.chatCur
 	}
 	i := u.inputAt + d
 	if i < 0 {
@@ -346,10 +381,12 @@ func (u *uiState) histStep(d int) {
 	}
 	u.inputAt = i
 	if i == len(u.inputHist) {
-		u.chatText = ""
+		u.chatText = u.histDraft
+		u.chatCur = clampPos(u.histDraftAt, 0, len([]rune(u.chatText)))
 		return
 	}
 	u.chatText = u.inputHist[i]
+	u.chatCur = len([]rune(u.chatText))
 }
 
 func (u *uiState) toast(text string, bad bool) {
@@ -436,54 +473,104 @@ func (u *uiState) cycleChannel() {
 	}
 }
 
-func (u *uiState) appendRune(r rune) {
+func clampPos(p, lo, hi int) int {
+	if p < lo {
+		return lo
+	}
+	if p > hi {
+		return hi
+	}
+	return p
+}
+
+// activeField 返回当前正在编辑的文本与光标位置（按 rune 计）。
+func (u *uiState) activeField() (*string, *int, bool) {
 	if u.view == viewLogin {
 		switch u.login.focus {
 		case 0:
-			u.login.server += string(r)
+			return &u.login.server, &u.login.serverCur, true
 		case 1:
-			u.login.name += string(r)
+			return &u.login.name, &u.login.nameCur, true
 		default:
-			u.login.pass += string(r)
+			return &u.login.pass, &u.login.passCur, true
 		}
-		return
 	}
 	if u.view == viewCreate {
-		u.createName += string(r)
-		return
+		return &u.createName, &u.createCur, true
 	}
 	if u.typing {
-		u.chatText += string(r)
+		return &u.chatText, &u.chatCur, true
+	}
+	return nil, nil, false
+}
+
+func (u *uiState) editInsert(r rune) {
+	s, cur, ok := u.activeField()
+	if !ok {
+		return
+	}
+	rs := []rune(*s)
+	pos := clampPos(*cur, 0, len(rs))
+	out := make([]rune, 0, len(rs)+1)
+	out = append(out, rs[:pos]...)
+	out = append(out, r)
+	out = append(out, rs[pos:]...)
+	*s = string(out)
+	*cur = pos + 1
+}
+
+func (u *uiState) editBackspace() {
+	s, cur, ok := u.activeField()
+	if !ok {
+		return
+	}
+	rs := []rune(*s)
+	pos := clampPos(*cur, 0, len(rs))
+	if pos == 0 {
+		return
+	}
+	*s = string(append(rs[:pos-1], rs[pos:]...))
+	*cur = pos - 1
+}
+
+func (u *uiState) editDelete() {
+	s, cur, ok := u.activeField()
+	if !ok {
+		return
+	}
+	rs := []rune(*s)
+	pos := clampPos(*cur, 0, len(rs))
+	if pos >= len(rs) {
+		return
+	}
+	*s = string(append(rs[:pos], rs[pos+1:]...))
+}
+
+func (u *uiState) editMove(d int) {
+	s, cur, ok := u.activeField()
+	if !ok {
+		return
+	}
+	*cur = clampPos(*cur+d, 0, len([]rune(*s)))
+}
+
+func (u *uiState) editHome() {
+	if _, cur, ok := u.activeField(); ok {
+		*cur = 0
 	}
 }
 
-func (u *uiState) backspace() {
-	cut := func(s string) string {
-		r := []rune(s)
-		if len(r) == 0 {
-			return s
-		}
-		return string(r[:len(r)-1])
-	}
-	if u.view == viewLogin {
-		switch u.login.focus {
-		case 0:
-			u.login.server = cut(u.login.server)
-		case 1:
-			u.login.name = cut(u.login.name)
-		default:
-			u.login.pass = cut(u.login.pass)
-		}
+func (u *uiState) editEnd() {
+	s, cur, ok := u.activeField()
+	if !ok {
 		return
 	}
-	if u.view == viewCreate {
-		u.createName = cut(u.createName)
-		return
-	}
-	if u.typing {
-		u.chatText = cut(u.chatText)
-	}
+	*cur = len([]rune(*s))
 }
+
+func (u *uiState) appendRune(r rune) { u.editInsert(r) }
+
+func (u *uiState) backspace() { u.editBackspace() }
 
 func maskPass(s string) string {
 	return strings.Repeat("*", len([]rune(s)))

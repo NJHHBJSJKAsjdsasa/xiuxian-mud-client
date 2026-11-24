@@ -290,6 +290,7 @@ func TestChatCanTypeSpaces(t *testing.T) {
 	a := richApp()
 	a.ui.typing = true
 	a.ui.chatText = "/mail"
+	a.ui.chatCur = len([]rune(a.ui.chatText))
 	for _, r := range []rune("list") {
 		a.onKey(key{kind: keyRune, r: r})
 	}

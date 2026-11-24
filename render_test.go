@@ -113,6 +113,7 @@ func TestRenderCreatePage(t *testing.T) {
 	a := testApp()
 	a.ui.view = viewCreate
 	a.ui.createName = "沈砚"
+	a.ui.createCur = len([]rune(a.ui.createName))
 	all := strings.Join(assertFrameWidth(t, a, 80, 24), "\n")
 	if !strings.Contains(all, "踏入凡界") || !strings.Contains(all, "沈砚") {
 		t.Error("建号页缺标题或输入内容")
@@ -167,6 +168,7 @@ func TestRenderTinyTerminalDoesNotPanic(t *testing.T) {
 	assertFrameWidth(t, a, 40, 12)
 	a.ui.typing = true
 	a.ui.chatText = "你好"
+	a.ui.chatCur = len([]rune(a.ui.chatText))
 	assertFrameWidth(t, a, 40, 12)
 }
 
@@ -189,6 +191,7 @@ func TestRenderTypingHint(t *testing.T) {
 	a := testApp()
 	a.ui.typing = true
 	a.ui.chatText = "有人在吗"
+	a.ui.chatCur = len([]rune(a.ui.chatText))
 	all := strings.Join(a.render(100, 30).frame(), "\n")
 	if !strings.Contains(all, "世界> 有人在吗▌") {
 		t.Error("输入行未显示频道与内容")

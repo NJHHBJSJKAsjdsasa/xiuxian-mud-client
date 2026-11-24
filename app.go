@@ -49,6 +49,7 @@ func newApp(cfg config) *app {
 		evs:  evs,
 	}
 	a.ui.login.name = cfg.LastName
+	a.ui.login.syncCursors()
 	go runNet(cmds, evs)
 	return a
 }
@@ -68,6 +69,7 @@ func (a *app) online() bool { return a.st.conn.kind == connOnline }
 
 func (a *app) autoLogin(name, pass string) {
 	a.ui.login.name, a.ui.login.pass = name, pass
+	a.ui.login.syncCursors()
 	a.pendingLogin = &loginAttempt{name: name, pass: pass}
 }
 
@@ -155,6 +157,7 @@ func (a *app) handleEvent(ev netEvent) {
 			a.act(actWorldMap, map[string]any{})
 		} else {
 			a.ui.view = viewCreate
+			a.ui.createCur = len([]rune(a.ui.createName))
 			if name := a.pendingCreate; name != "" {
 				a.pendingCreate = ""
 				a.act(actCreate, map[string]any{"name": name})
@@ -225,6 +228,7 @@ func (a *app) handleEvent(ev netEvent) {
 		a.ui.help = false
 		a.ui.talkPick = false
 	case evBattle:
+		old := a.st.battle
 		a.st.battle = e.b
 		// 开打了就收起交谈/帮助，别让弹层盖住战况。
 		a.ui.talkPick = false
@@ -233,9 +237,11 @@ func (a *app) handleEvent(ev netEvent) {
 			// 结算帧只带 id/over/won（没有敌方与我方），记一行结果后收掉战斗盒。
 			a.addLogs([]logLine{{K: "lvl", S: battleResultText(e.b)}})
 			a.st.battle = nil
-		}
-		if a.ui.target < 1 {
-			a.ui.target = 1
+		} else if old == nil || old.ID != e.b.ID {
+			// 新一场战斗：上一场选中的 2/3 号不能带进来（新战斗可能只有一只）。
+			a.ui.target = firstAliveFoeTarget(e.b)
+		} else if f := a.foeByIndex(a.ui.target); f == nil || f.Dead {
+			a.ui.target = firstAliveFoeTarget(e.b)
 		}
 	}
 }
@@ -285,11 +291,21 @@ func (a *app) keyLogin(k key) {
 	}
 	switch {
 	case k.is("tab"), k.is("down"):
-		a.ui.login.focus = (a.ui.login.focus + 1) % 3
+		a.ui.login.setFocus((a.ui.login.focus + 1) % 3)
 	case k.is("up"):
-		a.ui.login.focus = (a.ui.login.focus + 2) % 3
+		a.ui.login.setFocus((a.ui.login.focus + 2) % 3)
 	case k.is("enter"):
 		a.submitLogin()
+	case k.is("left"):
+		a.ui.editMove(-1)
+	case k.is("right"):
+		a.ui.editMove(1)
+	case k.is("home"):
+		a.ui.editHome()
+	case k.is("end"):
+		a.ui.editEnd()
+	case k.is("delete"):
+		a.ui.editDelete()
 	case k.is("backspace"):
 		a.ui.backspace()
 	case k.is("esc"):
@@ -300,6 +316,9 @@ func (a *app) keyLogin(k key) {
 }
 
 func (a *app) submitLogin() {
+	if a.ui.login.loading {
+		return
+	}
 	server := a.ui.login.server
 	name := a.ui.login.name
 	pass := a.ui.login.pass
@@ -331,6 +350,16 @@ func (a *app) keyCreate(k key) {
 		}
 		a.submitAt = nowMs()
 		a.act(actCreate, map[string]any{"name": name})
+	case k.is("left"):
+		a.ui.editMove(-1)
+	case k.is("right"):
+		a.ui.editMove(1)
+	case k.is("home"):
+		a.ui.editHome()
+	case k.is("end"):
+		a.ui.editEnd()
+	case k.is("delete"):
+		a.ui.editDelete()
 	case k.is("backspace"):
 		a.ui.backspace()
 	case k.kind == keyRune:
@@ -508,6 +537,7 @@ func (a *app) keyChat(k key) {
 		a.sendChatInput()
 	case k.is("esc"):
 		a.ui.chatText = ""
+		a.ui.chatCur = 0
 		a.ui.typing = false
 	case k.is("tab"):
 		a.ui.cycleChannel()
@@ -519,6 +549,16 @@ func (a *app) keyChat(k key) {
 		// 空格在 parseKeys 里是特殊键，不处理就等于"聊天打不出空格"，
 		// `mail list`、`排行 修为` 这类带参数的指令全都发不出去。
 		a.ui.appendRune(' ')
+	case k.is("left"):
+		a.ui.editMove(-1)
+	case k.is("right"):
+		a.ui.editMove(1)
+	case k.is("home"):
+		a.ui.editHome()
+	case k.is("end"):
+		a.ui.editEnd()
+	case k.is("delete"):
+		a.ui.editDelete()
 	case k.is("backspace"):
 		a.ui.backspace()
 	case k.kind == keyRune:
@@ -529,7 +569,10 @@ func (a *app) keyChat(k key) {
 func (a *app) startChat() {
 	a.ui.typing = true
 	a.ui.chatText = ""
+	a.ui.chatCur = 0
 	a.ui.inputAt = len(a.ui.inputHist)
+	a.ui.histDraft = ""
+	a.ui.histDraftAt = 0
 }
 
 // sendChatInput 解析输入行：普通发言、/w 私语、@道号 私语、/r 回复、/help 帮助。
@@ -537,6 +580,7 @@ func (a *app) startChat() {
 func (a *app) sendChatInput() {
 	raw := strings.TrimSpace(a.ui.chatText)
 	a.ui.chatText = ""
+	a.ui.chatCur = 0
 	a.ui.typing = false
 	if raw == "" {
 		return
@@ -1183,19 +1227,21 @@ func (a *app) shutdown() {
 	a.send(netCmd{kind: cmdShutdown})
 }
 
-// keyBattle 战斗中的按键：a 普攻、s 技能、i 丹药、f 逃、↑↓/1–9 选目标。
+// keyBattle 战斗中的按键：a 普攻、s 技能、i 丹药、f 逃；↑↓/jk、←→、Tab、1–9 选目标。
 func (a *app) keyBattle(k key, b *battleView) {
 	switch {
 	case k.is("pgup"), k.is("pgdn"), k.is("home"), k.is("end"):
 		a.scrollLogs(k)
-	case k.is("up"), k.isRune('k'):
+	case k.is("up"), k.is("left"), k.isRune('k'):
 		a.cycleFoe(-1)
-	case k.is("down"), k.isRune('j'):
+	case k.is("down"), k.is("right"), k.is("tab"), k.isRune('j'):
 		a.cycleFoe(1)
 	case k.kind == keyRune && digitOf(k.r) > 0:
 		n := digitOf(k.r)
-		if a.foeByIndex(n) != nil {
+		if f := a.foeByIndex(n); f != nil && !f.Dead {
 			a.ui.target = n
+		} else if f != nil {
+			a.ui.toast("这一只已经倒下了", false)
 		}
 	case k.isRune('a'), k.is("space"), k.is("enter"):
 		a.battleAct(b, map[string]any{"op": "attack", "target": a.ui.target})
@@ -1273,6 +1319,23 @@ func (a *app) cycleFoe(d int) {
 		return
 	}
 	a.ui.target = ids[(pos+d+len(ids))%len(ids)]
+}
+
+// firstAliveFoeTarget 返回第一只活着的敌方序号；全倒或单怪旧帧时回 1。
+func firstAliveFoeTarget(b *battleView) int {
+	if b == nil || len(b.Foes) == 0 {
+		return 1
+	}
+	for i, f := range b.Foes {
+		if f.Dead {
+			continue
+		}
+		if f.I > 0 {
+			return f.I
+		}
+		return i + 1
+	}
+	return 1
 }
 
 // foeByIndex 按 battle.foes[].i 找敌方；找不到返回 nil。
