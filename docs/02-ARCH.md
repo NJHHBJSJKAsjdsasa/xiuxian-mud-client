@@ -2,7 +2,7 @@
 
 ```
 doc_id: C-02
-version: 5.2.2
+version: 5.3.0
 updated: 2026-11-24
 owns: 技术选型、依赖、分层、目录结构、并发模型、模块依赖规则
 depends_on: C-01、C-03、C-04、C-05
@@ -73,7 +73,7 @@ client/
 ├── packaging/       发布目录组装脚本与 README
 ├── docs/            设计文档（本目录）
 ├── tools/doc-check.py  文档自查
-└── *_test.go        138 项单测
+└── *_test.go        140 项单测
 ```
 
 ## 4. 并发模型
@@ -86,7 +86,8 @@ client/
   channel；会话结束时关闭 `done`，读协程立刻退出，不留僵尸。
 - **两条通道**：命令 `chan netCmd`（缓冲 64）、事件 `chan netEvent`（缓冲 2048）；
 - **登录启动器**：独立进程 `launcher.exe` 读取 `data/manifest.json` 与 `assets/`，用原生 Win32
-  控件登录/注册；成功后按清单里的 `game` 路径以 `CREATE_NO_WINDOW` 启动宿主
+  控件登录/注册；账号库 `accounts.json` 用 Windows DPAPI（本机用户绑定）加密密码，最多 12 个账号、
+  最近使用置顶；成功后按清单里的 `game` 路径以 `CREATE_NO_WINDOW` 启动宿主
   `game/gamehost.exe`（宿主启动即 `FreeConsole`），宿主用 `LoadLibrary` 加载同目录
   `game/playcli.dll` 并调用导出的 `RunGame`；token 走 `XIUXIAN_TOKEN` 环境变量，密码不进入命令行。
   启动器不设 `HideWindow`，它会让宿主第一次 `ShowWindow` 被强制成 `SW_HIDE`；拉起后轮询
@@ -150,8 +151,10 @@ client/
 | 文件 | 位置 | 内容 |
 |---|---|---|
 | `playcli.json` | `os.UserConfigDir()/xiuxian-client/` | `server`、`lastName`、`color`、`windowMode`（缺省无边框） |
+| `accounts.json` | 同上 | 启动器账号库：`remember`、`accounts[]`（`name`/`server`/DPAPI `passEnc`），最多 12 个 |
 
-密码不落盘。命令行覆盖：`--server`、`--login`、`--create`、`--page`、`--move`、
+游戏配置不存密码；启动器仅在勾选“记住密码”时保存 DPAPI 密文。
+命令行覆盖：`--server`、`--login`、`--create`、`--page`、`--move`、
 `--snapshot`、`--color`、`--w`、`--h`。
 
 ## 10. 关键取舍

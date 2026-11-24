@@ -9,6 +9,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,9 +28,10 @@ import (
 )
 
 var (
-	u32 = windows.NewLazySystemDLL("user32.dll")
-	g32 = windows.NewLazySystemDLL("gdi32.dll")
-	k32 = windows.NewLazySystemDLL("kernel32.dll")
+	u32     = windows.NewLazySystemDLL("user32.dll")
+	g32     = windows.NewLazySystemDLL("gdi32.dll")
+	k32     = windows.NewLazySystemDLL("kernel32.dll")
+	crypt32 = windows.NewLazySystemDLL("crypt32.dll")
 
 	pRegisterClassExW       = u32.NewProc("RegisterClassExW")
 	pCreateWindowExW        = u32.NewProc("CreateWindowExW")
@@ -79,6 +81,9 @@ var (
 	pStretchBlt             = g32.NewProc("StretchBlt")
 	pDeleteDC               = g32.NewProc("DeleteDC")
 	pGetStockObject         = g32.NewProc("GetStockObject")
+	pCryptProtectData       = crypt32.NewProc("CryptProtectData")
+	pCryptUnprotectData     = crypt32.NewProc("CryptUnprotectData")
+	pLocalFree              = k32.NewProc("LocalFree")
 )
 
 const (
@@ -87,6 +92,7 @@ const (
 	wmEraseBkgnd     = 0x0014
 	wmCommand        = 0x0111
 	wmCtlColorEdit   = 0x0133
+	wmCtlColorBtn    = 0x0135
 	wmCtlColorStatic = 0x0138
 	wmSetFont        = 0x0030
 	wmAppDone        = 0x8001
@@ -106,9 +112,20 @@ const (
 	esPassword    = 0x0020
 	bsPush        = 0x00000000
 	bsDefPush     = 0x00000001
+	bsAutoCheck   = 0x00000003
 	ssLeft        = 0x00000000
 	ssBitmap      = 0x0000000E
 	ssCenterImage = 0x00000200
+	wsVScroll     = 0x00200000
+	cbsDropList   = 0x0003
+
+	cbAddString  = 0x0143
+	cbGetCurSel  = 0x0147
+	cbSetCurSel  = 0x014E
+	cbnSelChange = 1
+	bmGetCheck   = 0x00F0
+	bmSetCheck   = 0x00F1
+	bstChecked   = 1
 
 	imageBitmap   = 0
 	imageIcon     = 1
@@ -119,19 +136,23 @@ const (
 	stmSetImage   = 0x0172
 	wmSetIcon     = 0x0080
 
-	swShow       = 5
-	cwUseDefault = uintptr(0x80000000)
-	idLogin      = 1
-	idRegister   = 1001
-	idServer     = 1002
-	idName       = 1003
-	idPass       = 1004
-	idStatus     = 1005
-	idTitle      = 1006
-	idSub        = 1007
-	idLabServer  = 1008
-	idLabName    = 1009
-	idLabPass    = 1010
+	swShow        = 5
+	cwUseDefault  = uintptr(0x80000000)
+	idLogin       = 1
+	idRegister    = 1001
+	idServer      = 1002
+	idName        = 1003
+	idPass        = 1004
+	idStatus      = 1005
+	idTitle       = 1006
+	idSub         = 1007
+	idLabServer   = 1008
+	idLabName     = 1009
+	idLabPass     = 1010
+	idAccount     = 1013
+	idRemember    = 1014
+	idLabAccount  = 1015
+	idLabRemember = 1016
 
 	transparent    = 1
 	defaultCharset = 1
@@ -247,10 +268,92 @@ func saveConfig(c config) {
 	}
 }
 
+type savedAccount struct {
+	Name    string `json:"name"`
+	Server  string `json:"server,omitempty"`
+	PassEnc string `json:"passEnc,omitempty"`
+}
+
+type accountStore struct {
+	Remember bool           `json:"remember"`
+	Accounts []savedAccount `json:"accounts,omitempty"`
+}
+
+func accountsPath() string {
+	return filepath.Join(filepath.Dir(configPath()), "accounts.json")
+}
+
+func loadAccounts() accountStore {
+	var s accountStore
+	text, err := os.ReadFile(accountsPath())
+	if err != nil || json.Unmarshal(text, &s) != nil {
+		return accountStore{}
+	}
+	return s
+}
+
+func saveAccounts(s accountStore) {
+	path := accountsPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return
+	}
+	if text, err := json.MarshalIndent(s, "", "  "); err == nil {
+		_ = os.WriteFile(path, text, 0o600)
+	}
+}
+
+const accountEntropy = "xiuxian-client/accounts/v1"
+
+func protectSecret(plain string) (string, error) {
+	if plain == "" {
+		return "", nil
+	}
+	in := []byte(plain)
+	entropy := []byte(accountEntropy)
+	inBlob := windows.DataBlob{Size: uint32(len(in)), Data: &in[0]}
+	entBlob := windows.DataBlob{Size: uint32(len(entropy)), Data: &entropy[0]}
+	var out windows.DataBlob
+	r, _, err := pCryptProtectData.Call(
+		uintptr(unsafe.Pointer(&inBlob)), 0,
+		uintptr(unsafe.Pointer(&entBlob)), 0, 0, 0,
+		uintptr(unsafe.Pointer(&out)))
+	if r == 0 {
+		return "", err
+	}
+	defer pLocalFree.Call(uintptr(unsafe.Pointer(out.Data)))
+	return base64.StdEncoding.EncodeToString(unsafe.Slice(out.Data, out.Size)), nil
+}
+
+func unprotectSecret(enc string) (string, error) {
+	if enc == "" {
+		return "", nil
+	}
+	raw, err := base64.StdEncoding.DecodeString(enc)
+	if err != nil || len(raw) == 0 {
+		return "", errors.New("账号密码数据损坏")
+	}
+	entropy := []byte(accountEntropy)
+	inBlob := windows.DataBlob{Size: uint32(len(raw)), Data: &raw[0]}
+	entBlob := windows.DataBlob{Size: uint32(len(entropy)), Data: &entropy[0]}
+	var out windows.DataBlob
+	r, _, callErr := pCryptUnprotectData.Call(
+		uintptr(unsafe.Pointer(&inBlob)), 0, uintptr(unsafe.Pointer(&entBlob)),
+		0, 0, 0, uintptr(unsafe.Pointer(&out)))
+	if r == 0 {
+		return "", callErr
+	}
+	defer pLocalFree.Call(uintptr(unsafe.Pointer(out.Data)))
+	return string(unsafe.Slice(out.Data, out.Size)), nil
+}
+
 type authOutcome struct {
-	token   string
-	hasChar bool
-	err     error
+	token    string
+	hasChar  bool
+	err      error
+	name     string
+	server   string
+	pass     string
+	remember bool
 }
 
 type launcher struct {
@@ -267,6 +370,10 @@ type launcher struct {
 	loginBtn, registerBtn windows.HWND
 	status, title, sub    windows.HWND
 	labels                [3]windows.HWND
+	accountCombo          windows.HWND
+	rememberBox           windows.HWND
+
+	accounts accountStore
 
 	cfg       config
 	manifest  manifest
@@ -305,6 +412,7 @@ func main() {
 	l := &launcher{
 		cfg:      cfg,
 		manifest: mf,
+		accounts: loadAccounts(),
 		done:     make(chan authOutcome, 1),
 		gameDone: make(chan error, 1),
 	}
@@ -329,7 +437,7 @@ func main() {
 		return
 	}
 
-	rc := rect{Right: int32(l.px(520)), Bottom: int32(l.px(432))}
+	rc := rect{Right: int32(l.px(520)), Bottom: int32(l.px(500))}
 	pAdjustWindowRect.Call(uintptr(unsafe.Pointer(&rc)), wsCaption|wsSysMenu|wsMinimize, 0, 0)
 	hwnd, _, err := pCreateWindowExW.Call(
 		wsExControlParent, uintptr(unsafe.Pointer(launcherClass)),
@@ -398,19 +506,23 @@ func (l *launcher) buildControls() {
 	}
 	l.version = add("STATIC", "v"+l.manifest.Version+" · 原生启动器", child|ssLeft, 0, 24, 176, 300, 22, 1012)
 
-	l.labels[0] = add("STATIC", "服务器", child|ssLeft, 0, 30, 207, 70, 26, idLabServer)
-	l.labels[1] = add("STATIC", "道号", child|ssLeft, 0, 30, 247, 70, 26, idLabName)
-	l.labels[2] = add("STATIC", "密码", child|ssLeft, 0, 30, 287, 70, 26, idLabPass)
+	accountLabel := add("STATIC", "账号", child|ssLeft, 0, 30, 207, 70, 26, idLabAccount)
+	l.accountCombo = add("COMBOBOX", "", child|wsTabStop|wsVScroll|cbsDropList, 0, 112, 205, 380, 200, idAccount)
+	l.labels[0] = add("STATIC", "服务器", child|ssLeft, 0, 30, 247, 70, 26, idLabServer)
+	l.labels[1] = add("STATIC", "道号", child|ssLeft, 0, 30, 287, 70, 26, idLabName)
+	l.labels[2] = add("STATIC", "密码", child|ssLeft, 0, 30, 327, 70, 26, idLabPass)
 	edit := child | wsBorder | wsTabStop | esAutoHScroll
-	l.server = add("EDIT", l.cfg.Server, edit, 0, 112, 205, 380, 30, idServer)
-	l.name = add("EDIT", l.cfg.LastName, edit, 0, 112, 245, 380, 30, idName)
-	l.pass = add("EDIT", "", edit|esPassword, 0, 112, 285, 380, 30, idPass)
+	l.server = add("EDIT", l.cfg.Server, edit, 0, 112, 245, 380, 30, idServer)
+	l.name = add("EDIT", l.cfg.LastName, edit, 0, 112, 285, 380, 30, idName)
+	l.pass = add("EDIT", "", edit|esPassword, 0, 112, 325, 380, 30, idPass)
+	l.rememberBox = add("BUTTON", "", child|wsTabStop|bsAutoCheck, 0, 112, 365, 24, 26, idRemember)
+	rememberLabel := add("STATIC", "记住密码（本机加密）", child|ssLeft, 0, 142, 365, 300, 26, idLabRemember)
 	btn := child | wsTabStop
-	l.loginBtn = add("BUTTON", "登录", btn|bsDefPush, 0, 112, 332, 146, 38, idLogin)
-	l.registerBtn = add("BUTTON", "注册", btn|bsPush, 0, 346, 332, 146, 38, idRegister)
-	l.status = add("STATIC", "输入账号密码后登录，或直接注册。", child|ssLeft, 0, 30, 386, 450, 26, idStatus)
+	l.loginBtn = add("BUTTON", "登录", btn|bsDefPush, 0, 112, 398, 146, 38, idLogin)
+	l.registerBtn = add("BUTTON", "注册", btn|bsPush, 0, 346, 398, 146, 38, idRegister)
+	l.status = add("STATIC", "选择已存账号或直接输入道号。", child|ssLeft, 0, 30, 450, 460, 26, idStatus)
 
-	for _, h := range []windows.HWND{l.title, l.sub, l.version, l.labels[0], l.labels[1], l.labels[2], l.status} {
+	for _, h := range []windows.HWND{l.title, l.sub, l.version, accountLabel, l.labels[0], l.labels[1], l.labels[2], rememberLabel, l.status} {
 		if h != 0 {
 			pSendMessageW.Call(uintptr(h), wmSetFont, uintptr(l.font), 1)
 		}
@@ -423,17 +535,140 @@ func (l *launcher) buildControls() {
 	}
 	pSendMessageW.Call(uintptr(l.version), wmSetFont, uintptr(l.fontSmall), 1)
 	pSendMessageW.Call(uintptr(l.status), wmSetFont, uintptr(l.fontSmall), 1)
-	for _, h := range []windows.HWND{l.server, l.name, l.pass} {
+	for _, h := range []windows.HWND{l.accountCombo, l.server, l.name, l.pass, l.rememberBox, rememberLabel} {
 		pSendMessageW.Call(uintptr(h), wmSetFont, uintptr(l.font), 1)
 	}
 	for _, h := range []windows.HWND{l.loginBtn, l.registerBtn} {
 		pSendMessageW.Call(uintptr(h), wmSetFont, uintptr(l.font), 1)
 	}
-	if l.cfg.LastName != "" {
+	l.populateAccounts()
+}
+
+func sendMsg(h windows.HWND, msg uint32, wp, lp uintptr) uintptr {
+	r, _, _ := pSendMessageW.Call(uintptr(h), uintptr(msg), wp, lp)
+	return r
+}
+
+func setText(h windows.HWND, text string) {
+	pSetWindowTextW.Call(uintptr(h), uintptr(unsafe.Pointer(mustUTF16(text))))
+}
+
+func (l *launcher) setRemember(v bool) {
+	flag := uintptr(0)
+	if v {
+		flag = bstChecked
+	}
+	sendMsg(l.rememberBox, bmSetCheck, flag, 0)
+}
+
+func (l *launcher) rememberChecked() bool {
+	return sendMsg(l.rememberBox, bmGetCheck, 0, 0) == bstChecked
+}
+
+func (l *launcher) focusInitial() {
+	switch {
+	case getText(l.name) != "" && getText(l.pass) != "":
+		pSetFocus.Call(uintptr(l.loginBtn))
+	case getText(l.name) != "":
 		pSetFocus.Call(uintptr(l.pass))
-	} else {
+	default:
 		pSetFocus.Call(uintptr(l.name))
 	}
+}
+
+func (l *launcher) populateAccounts() {
+	for _, a := range l.accounts.Accounts {
+		name := mustUTF16(a.Name)
+		sendMsg(l.accountCombo, cbAddString, 0, uintptr(unsafe.Pointer(name)))
+	}
+	idx := -1
+	for i, a := range l.accounts.Accounts {
+		if a.Name == l.cfg.LastName {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 && len(l.accounts.Accounts) > 0 {
+		idx = 0
+	}
+	if idx >= 0 {
+		sendMsg(l.accountCombo, cbSetCurSel, uintptr(idx), 0)
+		l.applyAccount(idx, false)
+		return
+	}
+	setText(l.name, l.cfg.LastName)
+	l.setRemember(l.accounts.Remember)
+	l.focusInitial()
+}
+
+func (l *launcher) applyAccount(idx int, announce bool) {
+	if idx < 0 || idx >= len(l.accounts.Accounts) {
+		return
+	}
+	a := l.accounts.Accounts[idx]
+	setText(l.name, a.Name)
+	if a.Server != "" {
+		setText(l.server, a.Server)
+	}
+	pass := ""
+	decryptErr := false
+	if a.PassEnc != "" {
+		if p, err := unprotectSecret(a.PassEnc); err == nil {
+			pass = p
+		} else {
+			decryptErr = true
+		}
+	}
+	setText(l.pass, pass)
+	l.setRemember(a.PassEnc != "" && pass != "")
+	switch {
+	case decryptErr:
+		l.setStatus("已存密码无法解密，请重新输入。", true)
+	case announce && pass != "":
+		l.setStatus("已载入账号 "+a.Name+"，可直接登录。", false)
+	case announce:
+		l.setStatus("已载入账号 "+a.Name+"，请输入密码。", false)
+	}
+	l.focusInitial()
+}
+
+func (l *launcher) pickAccount() {
+	r := sendMsg(l.accountCombo, cbGetCurSel, 0, 0)
+	if r == ^uintptr(0) {
+		return
+	}
+	l.applyAccount(int(r), true)
+}
+
+func mergeAccount(old []savedAccount, a savedAccount) []savedAccount {
+	list := make([]savedAccount, 0, len(old)+1)
+	list = append(list, a)
+	for _, prev := range old {
+		if prev.Name != a.Name {
+			list = append(list, prev)
+		}
+	}
+	if len(list) > 12 {
+		list = list[:12]
+	}
+	return list
+}
+
+func (l *launcher) rememberAccount(name, server, pass string, remember bool) {
+	if name == "" {
+		return
+	}
+	a := savedAccount{Name: name, Server: server}
+	if remember {
+		if enc, err := protectSecret(pass); err == nil {
+			a.PassEnc = enc
+		} else {
+			remember = false
+		}
+	}
+	l.accounts.Accounts = mergeAccount(l.accounts.Accounts, a)
+	l.accounts.Remember = remember
+	saveAccounts(l.accounts)
 }
 
 // scaledBanner 把 assets/banner.bmp 缩放到当前 DPI 的控件尺寸，返回可直接给 STATIC 的 HBITMAP。
@@ -546,8 +781,17 @@ func launcherWndProc(hwnd uintptr, msg uint32, wparam, lparam uintptr) uintptr {
 		pSetTextColor.Call(wparam, uintptr(color(226, 226, 214)))
 		pSetBkColor.Call(wparam, uintptr(color(30, 37, 46)))
 		return uintptr(l.panelBrush)
+	case wmCtlColorBtn:
+		pSetBkMode.Call(wparam, transparent)
+		pSetTextColor.Call(wparam, uintptr(color(226, 226, 214)))
+		pSetBkColor.Call(wparam, uintptr(color(16, 20, 26)))
+		return uintptr(l.bgBrush)
 	case wmCommand:
 		id := int(wparam & 0xFFFF)
+		if id == idAccount && uint16(wparam>>16) == cbnSelChange {
+			l.pickAccount()
+			return 0
+		}
 		switch id {
 		case idLogin:
 			l.startAuth(false)
@@ -608,8 +852,10 @@ func (l *launcher) startAuth(register bool) {
 	l.busy = true
 	l.setStatus(map[bool]string{false: "登录中…", true: "注册中…"}[register], false)
 	l.setInputsEnabled(false)
+	remember := l.rememberChecked()
 	go func() {
 		res := auth(server, name, pass, register)
+		res.name, res.server, res.pass, res.remember = name, server, pass, remember
 		l.done <- res
 		pPostMessageW.Call(uintptr(l.hwnd), wmAppDone, 0, 0)
 	}()
@@ -628,6 +874,7 @@ func (l *launcher) finishAuth(res authOutcome) {
 	cfg := l.cfg
 	cfg.Server, cfg.LastName = server, name
 	saveConfig(cfg)
+	l.rememberAccount(res.name, res.server, res.pass, res.remember)
 
 	l.busy = true
 	l.setInputsEnabled(false)
@@ -720,7 +967,7 @@ func (l *launcher) setInputsEnabled(enabled bool) {
 	if enabled {
 		flag = 1
 	}
-	for _, h := range []windows.HWND{l.server, l.name, l.pass, l.loginBtn, l.registerBtn} {
+	for _, h := range []windows.HWND{l.accountCombo, l.server, l.name, l.pass, l.rememberBox, l.loginBtn, l.registerBtn} {
 		pEnableWindow.Call(uintptr(h), flag)
 	}
 }
