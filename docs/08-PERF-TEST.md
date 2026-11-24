@@ -2,7 +2,7 @@
 
 ```
 doc_id: C-08
-version: 5.1.0
+version: 5.1.1
 updated: 2026-11-24
 owns: 帧预算、内存与日志上限、界面测试、离屏快照、怎么复用服务端脚本
 depends_on: C-02、C-04、C-05、服务端 docs/09（验收脚本）
@@ -72,7 +72,7 @@ depends_on: C-02、C-04、C-05、服务端 docs/09（验收脚本）
 ## 5. 自动化怎么跑
 
 ```bash
-go test ./...              # 134 项：文本、字符屏、按键、状态、渲染、操作、快照、GUI
+go test ./...              # 135 项：文本、字符屏、按键、状态、渲染、操作、快照、GUI、启动器参数
 go vet ./...               # 静态检查
 python tools/doc-check.py  # 文档矩阵与链接
 ```

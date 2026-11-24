@@ -56,7 +56,7 @@ Windows 桌面窗口（DPI 感知、鼠标拖舆图、双击/`0` 回中、滚轮
 
 - 分层：`proto`（协议） / `net`（连接） / `state`（状态） / `app`（交互） / `render`（绘制） /
   `gui`（Windows 原生窗口，非 Windows 为空实现）。
-- `go vet ./...` 干净，`go test ./...` 134 项全绿（含"每行宽度恰好等于终端宽"的逐字符断言）。
+- `go vet ./...` 干净，`go test ./...` 135 项全绿（含"每行宽度恰好等于终端宽"的逐字符断言）。
 - 协议以服务端 `docs/05-PROTOCOL.md` 为准，接入流程看 `docs/12-API.md`。
 
 ## 怎么跑
@@ -103,9 +103,9 @@ dist/九州问道/
 启动 `game/gamehost.exe`，宿主加载 `game/playcli.dll`。Go DLL 只依赖系统
 `KERNEL32` / UCRT，不需要额外运行库 DLL。打包需要 MSYS2 的 `gcc`（`make dist` 会自动编 DLL 与宿主）。
 个人配置仍在 `%APPDATA%/xiuxian-client/playcli.json`。
-启动器用 `CREATE_NO_WINDOW` + `HideWindow` 拉起宿主，宿主启动即 `FreeConsole`；
-双击启动器不会多出命令行黑窗。
-```
+启动器只用 `CREATE_NO_WINDOW` 拉起宿主，宿主启动即 `FreeConsole`；不设 `HideWindow`，
+否则宿主第一次 `ShowWindow` 会被强制成隐藏，游戏窗口存在但看不见。登录成功后启动器会等
+子进程的 `JiuzhouWenDao` 窗口真正可见才退出；双击启动器不会多出命令行黑窗。
 
 ## 键位
 

@@ -2,8 +2,8 @@
 
 // 九州问道 · 登录启动器。
 //
-// 独立于游戏主窗口：原生 Win32 控件负责登录/注册，成功后用
-// XIUXIAN_TOKEN 环境变量把令牌交给同目录的 playcli.exe --gui。
+// 独立于游戏主窗口：原生 Win32 控件负责登录/注册，成功后按
+// data/manifest.json 的 game 路径拉起宿主，并用 XIUXIAN_TOKEN 交接令牌。
 // 密码不进入命令行，也不写盘。
 package main
 
@@ -67,6 +67,10 @@ var (
 	pCreateFontW            = g32.NewProc("CreateFontW")
 	pGetDeviceCaps          = g32.NewProc("GetDeviceCaps")
 	pGetModuleHandleW       = k32.NewProc("GetModuleHandleW")
+	pEnumWindows            = u32.NewProc("EnumWindows")
+	pGetWindowThreadProcID  = u32.NewProc("GetWindowThreadProcessId")
+	pIsWindowVisible        = u32.NewProc("IsWindowVisible")
+	pGetClassNameW          = u32.NewProc("GetClassNameW")
 	pMessageBoxW            = u32.NewProc("MessageBoxW")
 	pLoadImageW             = u32.NewProc("LoadImageW")
 	pCreateCompatibleDC     = g32.NewProc("CreateCompatibleDC")
@@ -86,6 +90,7 @@ const (
 	wmCtlColorStatic = 0x0138
 	wmSetFont        = 0x0030
 	wmAppDone        = 0x8001
+	wmGameDone       = 0x8002
 
 	wsChild           = 0x40000000
 	wsVisible         = 0x10000000
@@ -271,6 +276,7 @@ type launcher struct {
 	busy      bool
 	statusBad bool
 	done      chan authOutcome
+	gameDone  chan error
 }
 
 var appUI *launcher
@@ -295,7 +301,12 @@ func main() {
 	if cfg.Server == defaultServer && mf.Server != "" {
 		cfg.Server = mf.Server
 	}
-	l := &launcher{cfg: cfg, manifest: mf, done: make(chan authOutcome, 1)}
+	l := &launcher{
+		cfg:      cfg,
+		manifest: mf,
+		done:     make(chan authOutcome, 1),
+		gameDone: make(chan error, 1),
+	}
 	l.scale = dpiScale()
 	appUI = l
 
@@ -552,6 +563,13 @@ func launcherWndProc(hwnd uintptr, msg uint32, wparam, lparam uintptr) uintptr {
 		default:
 		}
 		return 0
+	case wmGameDone:
+		select {
+		case err := <-l.gameDone:
+			l.finishGameLaunch(err)
+		default:
+		}
+		return 0
 	case wmClose:
 		pDestroyWindow.Call(hwnd)
 		return 0
@@ -588,9 +606,7 @@ func (l *launcher) startAuth(register bool) {
 	}
 	l.busy = true
 	l.setStatus(map[bool]string{false: "登录中…", true: "注册中…"}[register], false)
-	for _, h := range []windows.HWND{l.server, l.name, l.pass, l.loginBtn, l.registerBtn} {
-		pEnableWindow.Call(uintptr(h), 0)
-	}
+	l.setInputsEnabled(false)
 	go func() {
 		res := auth(server, name, pass, register)
 		l.done <- res
@@ -600,9 +616,7 @@ func (l *launcher) startAuth(register bool) {
 
 func (l *launcher) finishAuth(res authOutcome) {
 	l.busy = false
-	for _, h := range []windows.HWND{l.server, l.name, l.pass, l.loginBtn, l.registerBtn} {
-		pEnableWindow.Call(uintptr(h), 1)
-	}
+	l.setInputsEnabled(true)
 	if res.err != nil {
 		l.setStatus("失败："+res.err.Error(), true)
 		pSetFocus.Call(uintptr(l.pass))
@@ -613,29 +627,131 @@ func (l *launcher) finishAuth(res authOutcome) {
 	cfg := l.cfg
 	cfg.Server, cfg.LastName = server, name
 	saveConfig(cfg)
-	l.setStatus("登录成功，正在打开游戏…", false)
 
+	l.busy = true
+	l.setInputsEnabled(false)
+	l.setStatus("登录成功，正在打开游戏…", false)
+	if err := l.startGame(res.token, server); err != nil {
+		l.busy = false
+		l.setInputsEnabled(true)
+		l.setStatus("启动游戏失败："+err.Error(), true)
+		pSetFocus.Call(uintptr(l.pass))
+	}
+}
+
+// startGame 拉起宿主后先等游戏窗口真正可见，再让启动器退出。
+// 启动器立刻退出会把“游戏没起来”伪装成“窗口消失”，这里改用窗口就绪确认。
+func (l *launcher) startGame(token, server string) error {
 	game, err := gamePath(l.manifest.Game)
 	if err != nil {
-		l.setStatus(err.Error(), true)
-		return
+		return err
 	}
 	cmd := exec.Command(game, "--server", server, "--gui")
-	// 即使发布目录被换回旧的 console 程序，也不让它弹黑窗。
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000, HideWindow: true} // CREATE_NO_WINDOW
+	cmd.SysProcAttr = gameProcessAttrs()
 	env := make([]string, 0, len(os.Environ())+2)
 	for _, kv := range os.Environ() {
 		if !strings.HasPrefix(kv, "XIUXIAN_TOKEN=") && !strings.HasPrefix(kv, "XIUXIAN_SERVER=") {
 			env = append(env, kv)
 		}
 	}
-	cmd.Env = append(env, "XIUXIAN_TOKEN="+res.token, "XIUXIAN_SERVER="+server)
+	cmd.Env = append(env, "XIUXIAN_TOKEN="+token, "XIUXIAN_SERVER="+server)
 	cmd.Dir = filepath.Dir(game)
 	if err := cmd.Start(); err != nil {
-		l.setStatus("启动游戏失败："+err.Error(), true)
+		return err
+	}
+	pid := uint32(cmd.Process.Pid)
+	exited := make(chan error, 1)
+	go func() {
+		exited <- cmd.Wait()
+	}()
+	go l.watchGame(pid, cmd, exited)
+	return nil
+}
+
+// 只禁止新控制台；不能设 HideWindow，它会让宿主第一次 ShowWindow 变成 SW_HIDE，
+// 游戏窗口会存在但不可见，表现为点登录后启动器消失、别处什么都没出现。
+func gameProcessAttrs() *syscall.SysProcAttr {
+	return &syscall.SysProcAttr{CreationFlags: windows.CREATE_NO_WINDOW}
+}
+
+func (l *launcher) watchGame(pid uint32, cmd *exec.Cmd, exited <-chan error) {
+	const wait = 12 * time.Second
+	deadline := time.Now().Add(wait)
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if gameWindowVisible(pid) {
+			l.notifyGameDone(nil)
+			return
+		}
+		select {
+		case err := <-exited:
+			l.notifyGameDone(fmt.Errorf("游戏进程提前退出：%v", err))
+			return
+		case <-ticker.C:
+		}
+		if time.Now().After(deadline) {
+			_ = cmd.Process.Kill()
+			l.notifyGameDone(errors.New("游戏窗口未出现（已等待 12 秒）"))
+			return
+		}
+	}
+}
+
+func (l *launcher) notifyGameDone(err error) {
+	l.gameDone <- err
+	pPostMessageW.Call(uintptr(l.hwnd), wmGameDone, 0, 0)
+}
+
+func (l *launcher) finishGameLaunch(err error) {
+	if err == nil {
+		pDestroyWindow.Call(uintptr(l.hwnd))
 		return
 	}
-	pDestroyWindow.Call(uintptr(l.hwnd))
+	l.busy = false
+	l.setInputsEnabled(true)
+	l.setStatus("打开游戏失败："+err.Error(), true)
+	pSetFocus.Call(uintptr(l.pass))
+}
+
+func (l *launcher) setInputsEnabled(enabled bool) {
+	flag := uintptr(0)
+	if enabled {
+		flag = 1
+	}
+	for _, h := range []windows.HWND{l.server, l.name, l.pass, l.loginBtn, l.registerBtn} {
+		pEnableWindow.Call(uintptr(h), flag)
+	}
+}
+
+var gameProbe struct {
+	pid   uint32
+	found bool
+}
+
+var gameProbeProc = windows.NewCallback(func(hwnd uintptr, _ uintptr) uintptr {
+	var pid uint32
+	pGetWindowThreadProcID.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
+	if pid != gameProbe.pid {
+		return 1
+	}
+	if r, _, _ := pIsWindowVisible.Call(hwnd); r == 0 {
+		return 1
+	}
+	var buf [64]uint16
+	n, _, _ := pGetClassNameW.Call(hwnd, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
+	if int(n) > 0 && windows.UTF16ToString(buf[:int(n)]) == "JiuzhouWenDao" {
+		gameProbe.found = true
+		return 0
+	}
+	return 1
+})
+
+func gameWindowVisible(pid uint32) bool {
+	gameProbe.pid = pid
+	gameProbe.found = false
+	pEnumWindows.Call(gameProbeProc, 0)
+	return gameProbe.found
 }
 
 func gamePath(rel string) (string, error) {
