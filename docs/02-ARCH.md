@@ -2,7 +2,7 @@
 
 ```
 doc_id: C-02
-version: 5.1.4
+version: 5.1.5
 updated: 2026-11-24
 owns: 技术选型、依赖、分层、目录结构、并发模型、模块依赖规则
 depends_on: C-01、C-03、C-04、C-05
@@ -67,6 +67,9 @@ client/
 ├── vt_windows.go    Windows 控制台开 VT
 ├── vt_other.go      Unix 空实现
 ├── cmd/launcher/    Windows 原生登录启动器（独立 exe）
+├── assets/          启动器横幅与图标（随发布目录）
+├── data/manifest.json  名称 / 版本 / 游戏路径 / 默认服务器
+├── packaging/       发布目录组装脚本与 README
 ├── docs/            设计文档（本目录）
 ├── tools/doc-check.py  文档自查
 └── *_test.go        134 项单测
@@ -81,8 +84,9 @@ client/
 - **读 goroutine**：`wsSession` 里单独起一个只做 `ReadMessage` 的协程，把结果投进
   channel；会话结束时关闭 `done`，读协程立刻退出，不留僵尸。
 - **两条通道**：命令 `chan netCmd`（缓冲 64）、事件 `chan netEvent`（缓冲 2048）；
-- **登录启动器**：独立进程 `launcher.exe` 用原生 Win32 控件登录/注册；成功后 `exec` 同目录
-  `playcli.exe --server ... --gui`，token 走 `XIUXIAN_TOKEN` 环境变量，密码不进入命令行。
+- **登录启动器**：独立进程 `launcher.exe` 读取 `data/manifest.json` 与 `assets/`，用原生 Win32
+  控件登录/注册；成功后按清单里的 `game` 路径 `exec` 游戏（默认 `game/playcli.exe`），token 走
+  `XIUXIAN_TOKEN` 环境变量，密码不进入命令行。
 - **桌面窗口**：GUI 线程 `runtime.LockOSThread` 跑 Win32 消息循环，250ms `WM_TIMER`
   里执行同一个 `drain → tick → render`；键盘/鼠标消息转换成同一套 `key` 与 `uiState`，
   不引入第二套状态机。所有 GDI 句柄都在该线程创建与释放。

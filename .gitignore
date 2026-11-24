@@ -5,3 +5,6 @@ Thumbs.db
 # Go 构建产物
 /bin
 /*.exe
+
+# 发布目录
+/dist

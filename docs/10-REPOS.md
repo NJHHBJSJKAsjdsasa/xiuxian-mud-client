@@ -2,7 +2,7 @@
 
 ```
 doc_id: C-10
-version: 4.3.0
+version: 4.3.1
 updated: 2026-11-24
 owns: 客户端仓的克隆、密钥、日常循环、与服务端的协议同步、构建发布与排错
 depends_on: C-00、C-02、C-03、服务端 docs/05、服务端 docs/13
@@ -50,6 +50,16 @@ make build                    # 首次拉依赖（约 10 秒）；产出 bin/pla
 
 - `--login 道号:密码`：跳过登录页（省掉每次手输）。
 - `--create 道号`：登录后若还没有角色，自动建号。
+
+### 3.1 Windows 发布目录
+
+```bash
+make dist        # 需要 bin/playcli.exe 与 bin/launcher.exe，先跑 make build
+```
+
+产出 `dist/九州问道/`：`九州问道.exe`（启动器）、`game/playcli.exe`、`assets/`（横幅/图标）、
+`data/manifest.json`、`README.txt`。启动器从 manifest 找游戏与版本，成功后以 token 启动游戏；
+发布目录可以整个压缩分发，个人配置仍写 `%APPDATA%/xiuxian-client/playcli.json`。
 
 Linux 编译不需要任何图形库（纯终端）：只需要 Go 工具链，没有 `apt-get` 前置包。
 

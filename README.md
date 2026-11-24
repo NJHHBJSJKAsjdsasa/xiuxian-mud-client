@@ -82,6 +82,23 @@ make build                                  # 产出 bin/playcli(.exe) 与 bin/l
 
 # 快照前先按几个键（联调操作/复现问题）：开背包、选中第二项、回车装备
 ./bin/playcli --login 沈砚:test123456 --keys "f2,down,enter" --snapshot shot.txt --color off
+
+## 发布目录（Windows）
+
+`make dist` 生成可以直接拷走的游戏目录，**启动器只是入口**，游戏本体、资源与清单都是独立文件：
+
+```
+dist/九州问道/
+├── 九州问道.exe          启动器：登录 / 注册 / 拉起游戏
+├── game/playcli.exe      游戏本体
+├── assets/banner.bmp     启动器横幅（缺失时退回文字标题）
+├── assets/icon.ico       窗口图标
+├── data/manifest.json    名称 / 版本 / 游戏路径 / 默认服务器
+└── README.txt
+```
+
+启动器从 `data/manifest.json` 找游戏与版本、加载 `assets/`；成功后用 `XIUXIAN_TOKEN`
+环境变量启动 `game/playcli.exe --gui`。个人配置仍在 `%APPDATA%/xiuxian-client/playcli.json`。
 ```
 
 ## 键位

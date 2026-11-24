@@ -30,43 +30,50 @@ var (
 	g32 = windows.NewLazySystemDLL("gdi32.dll")
 	k32 = windows.NewLazySystemDLL("kernel32.dll")
 
-	pRegisterClassExW   = u32.NewProc("RegisterClassExW")
-	pCreateWindowExW    = u32.NewProc("CreateWindowExW")
-	pDefWindowProcW     = u32.NewProc("DefWindowProcW")
-	pShowWindow         = u32.NewProc("ShowWindow")
-	pUpdateWindow       = u32.NewProc("UpdateWindow")
-	pGetMessageW        = u32.NewProc("GetMessageW")
-	pTranslateMessage   = u32.NewProc("TranslateMessage")
-	pDispatchMessageW   = u32.NewProc("DispatchMessageW")
-	pIsDialogMessageW   = u32.NewProc("IsDialogMessageW")
-	pPostQuitMessage    = u32.NewProc("PostQuitMessage")
-	pPostMessageW       = u32.NewProc("PostMessageW")
-	pDestroyWindow      = u32.NewProc("DestroyWindow")
-	pSendMessageW       = u32.NewProc("SendMessageW")
-	pSetWindowTextW     = u32.NewProc("SetWindowTextW")
-	pGetWindowTextW     = u32.NewProc("GetWindowTextW")
-	pGetWindowTextLenW  = u32.NewProc("GetWindowTextLengthW")
-	pEnableWindow       = u32.NewProc("EnableWindow")
-	pSetFocus           = u32.NewProc("SetFocus")
-	pGetDC              = u32.NewProc("GetDC")
-	pReleaseDC          = u32.NewProc("ReleaseDC")
-	pGetClientRect      = u32.NewProc("GetClientRect")
-	pGetWindowRect      = u32.NewProc("GetWindowRect")
-	pSetWindowPos       = u32.NewProc("SetWindowPos")
-	pGetSystemMetrics   = u32.NewProc("GetSystemMetrics")
-	pAdjustWindowRect   = u32.NewProc("AdjustWindowRectEx")
-	pLoadCursorW        = u32.NewProc("LoadCursorW")
-	pSetProcessDPIAware = u32.NewProc("SetProcessDPIAware")
-	pFillRect           = u32.NewProc("FillRect")
-	pSetBkMode          = g32.NewProc("SetBkMode")
-	pSetTextColor       = g32.NewProc("SetTextColor")
-	pSetBkColor         = g32.NewProc("SetBkColor")
-	pCreateSolidBrush   = g32.NewProc("CreateSolidBrush")
-	pDeleteObject       = g32.NewProc("DeleteObject")
-	pCreateFontW        = g32.NewProc("CreateFontW")
-	pGetDeviceCaps      = g32.NewProc("GetDeviceCaps")
-	pGetModuleHandleW   = k32.NewProc("GetModuleHandleW")
-	pMessageBoxW        = u32.NewProc("MessageBoxW")
+	pRegisterClassExW       = u32.NewProc("RegisterClassExW")
+	pCreateWindowExW        = u32.NewProc("CreateWindowExW")
+	pDefWindowProcW         = u32.NewProc("DefWindowProcW")
+	pShowWindow             = u32.NewProc("ShowWindow")
+	pUpdateWindow           = u32.NewProc("UpdateWindow")
+	pGetMessageW            = u32.NewProc("GetMessageW")
+	pTranslateMessage       = u32.NewProc("TranslateMessage")
+	pDispatchMessageW       = u32.NewProc("DispatchMessageW")
+	pIsDialogMessageW       = u32.NewProc("IsDialogMessageW")
+	pPostQuitMessage        = u32.NewProc("PostQuitMessage")
+	pPostMessageW           = u32.NewProc("PostMessageW")
+	pDestroyWindow          = u32.NewProc("DestroyWindow")
+	pSendMessageW           = u32.NewProc("SendMessageW")
+	pSetWindowTextW         = u32.NewProc("SetWindowTextW")
+	pGetWindowTextW         = u32.NewProc("GetWindowTextW")
+	pGetWindowTextLenW      = u32.NewProc("GetWindowTextLengthW")
+	pEnableWindow           = u32.NewProc("EnableWindow")
+	pSetFocus               = u32.NewProc("SetFocus")
+	pGetDC                  = u32.NewProc("GetDC")
+	pReleaseDC              = u32.NewProc("ReleaseDC")
+	pGetClientRect          = u32.NewProc("GetClientRect")
+	pGetWindowRect          = u32.NewProc("GetWindowRect")
+	pSetWindowPos           = u32.NewProc("SetWindowPos")
+	pGetSystemMetrics       = u32.NewProc("GetSystemMetrics")
+	pAdjustWindowRect       = u32.NewProc("AdjustWindowRectEx")
+	pLoadCursorW            = u32.NewProc("LoadCursorW")
+	pSetProcessDPIAware     = u32.NewProc("SetProcessDPIAware")
+	pFillRect               = u32.NewProc("FillRect")
+	pSetBkMode              = g32.NewProc("SetBkMode")
+	pSetTextColor           = g32.NewProc("SetTextColor")
+	pSetBkColor             = g32.NewProc("SetBkColor")
+	pCreateSolidBrush       = g32.NewProc("CreateSolidBrush")
+	pDeleteObject           = g32.NewProc("DeleteObject")
+	pCreateFontW            = g32.NewProc("CreateFontW")
+	pGetDeviceCaps          = g32.NewProc("GetDeviceCaps")
+	pGetModuleHandleW       = k32.NewProc("GetModuleHandleW")
+	pMessageBoxW            = u32.NewProc("MessageBoxW")
+	pLoadImageW             = u32.NewProc("LoadImageW")
+	pCreateCompatibleDC     = g32.NewProc("CreateCompatibleDC")
+	pCreateCompatibleBitmap = g32.NewProc("CreateCompatibleBitmap")
+	pSelectObject           = g32.NewProc("SelectObject")
+	pStretchBlt             = g32.NewProc("StretchBlt")
+	pDeleteDC               = g32.NewProc("DeleteDC")
+	pGetStockObject         = g32.NewProc("GetStockObject")
 )
 
 const (
@@ -94,6 +101,17 @@ const (
 	bsPush        = 0x00000000
 	bsDefPush     = 0x00000001
 	ssLeft        = 0x00000000
+	ssBitmap      = 0x0000000E
+	ssCenterImage = 0x00000200
+
+	imageBitmap   = 0
+	imageIcon     = 1
+	lrLoadFile    = 0x00000010
+	lrCreatedib   = 0x00002000
+	lrDefaultSize = 0x00000040
+	srcCopy       = 0x00CC0020
+	stmSetImage   = 0x0172
+	wmSetIcon     = 0x0080
 
 	swShow       = 5
 	cwUseDefault = uintptr(0x80000000)
@@ -146,6 +164,54 @@ type config struct {
 	Color    string `json:"color"`
 }
 
+type manifest struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+	Game    string `json:"game"`
+	Server  string `json:"server"`
+}
+
+const defaultServer = "ws://127.0.0.1:8080"
+
+func loadManifest() manifest {
+	m := manifest{Name: "九州问道", Version: "0.1.0", Game: "game/playcli.exe", Server: defaultServer}
+	for _, p := range candidatePaths(filepath.Join("data", "manifest.json")) {
+		text, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		var got manifest
+		if json.Unmarshal(text, &got) != nil {
+			continue
+		}
+		if got.Name == "" {
+			got.Name = m.Name
+		}
+		if got.Version == "" {
+			got.Version = m.Version
+		}
+		if got.Game == "" {
+			got.Game = m.Game
+		}
+		return got
+	}
+	return m
+}
+
+// candidatePaths 先找 exe 同目录，再找 bin/ 的上一级（开发期 bin/launcher.exe）。
+func candidatePaths(rel string) []string {
+	exe, err := os.Executable()
+	if err != nil {
+		return []string{rel}
+	}
+	dir := filepath.Dir(exe)
+	return []string{
+		filepath.Join(dir, rel),
+		filepath.Join(dir, "..", rel),
+		rel,
+	}
+}
+
 func configPath() string {
 	dir, err := os.UserConfigDir()
 	if err != nil || dir == "" {
@@ -155,10 +221,10 @@ func configPath() string {
 }
 
 func loadConfig() config {
-	c := config{Server: "ws://127.0.0.1:8080", Color: "true"}
+	c := config{Server: defaultServer, Color: "true"}
 	text, err := os.ReadFile(configPath())
 	if err != nil || json.Unmarshal(text, &c) != nil || c.Server == "" {
-		c.Server = "ws://127.0.0.1:8080"
+		c.Server = defaultServer
 		c.Color = "true"
 	}
 	return c
@@ -196,6 +262,11 @@ type launcher struct {
 	labels                [3]windows.HWND
 
 	cfg       config
+	manifest  manifest
+	version   windows.HWND
+	banner    windows.HWND
+	bannerBmp windows.Handle
+	icon      windows.Handle
 	busy      bool
 	statusBad bool
 	done      chan authOutcome
@@ -219,7 +290,11 @@ func main() {
 	pSetProcessDPIAware.Call()
 
 	cfg := loadConfig()
-	l := &launcher{cfg: cfg, done: make(chan authOutcome, 1)}
+	mf := loadManifest()
+	if cfg.Server == defaultServer && mf.Server != "" {
+		cfg.Server = mf.Server
+	}
+	l := &launcher{cfg: cfg, manifest: mf, done: make(chan authOutcome, 1)}
 	l.scale = dpiScale()
 	appUI = l
 
@@ -241,11 +316,11 @@ func main() {
 		return
 	}
 
-	rc := rect{Right: int32(l.px(460)), Bottom: int32(l.px(320))}
+	rc := rect{Right: int32(l.px(520)), Bottom: int32(l.px(432))}
 	pAdjustWindowRect.Call(uintptr(unsafe.Pointer(&rc)), wsCaption|wsSysMenu|wsMinimize, 0, 0)
 	hwnd, _, err := pCreateWindowExW.Call(
 		wsExControlParent, uintptr(unsafe.Pointer(launcherClass)),
-		uintptr(unsafe.Pointer(mustUTF16("九州问道 · 登录"))),
+		uintptr(unsafe.Pointer(mustUTF16(mf.Name+" · 登录"))),
 		wsCaption|wsSysMenu|wsMinimize,
 		cwUseDefault, cwUseDefault,
 		uintptr(rc.Right-rc.Left), uintptr(rc.Bottom-rc.Top),
@@ -256,6 +331,7 @@ func main() {
 	}
 	l.hwnd = windows.HWND(hwnd)
 	l.center()
+	l.loadIcon()
 	l.buildControls()
 	pShowWindow.Call(hwnd, swShow)
 	pUpdateWindow.Call(hwnd)
@@ -299,25 +375,40 @@ func (l *launcher) buildControls() {
 		return windows.HWND(r)
 	}
 	child := uintptr(wsChild | wsVisible)
-	l.title = add("STATIC", "九州问道", child|ssLeft, 0, 28, 18, 260, 38, idTitle)
-	l.sub = add("STATIC", "登录或注册后打开游戏窗口", child|ssLeft, 0, 30, 58, 380, 24, idSub)
-	l.labels[0] = add("STATIC", "服务器", child|ssLeft, 0, 30, 96, 70, 26, idLabServer)
-	l.labels[1] = add("STATIC", "道号", child|ssLeft, 0, 30, 136, 70, 26, idLabName)
-	l.labels[2] = add("STATIC", "密码", child|ssLeft, 0, 30, 176, 70, 26, idLabPass)
-	edit := child | wsBorder | wsTabStop | esAutoHScroll
-	l.server = add("EDIT", l.cfg.Server, edit, 0, 102, 94, 326, 30, idServer)
-	l.name = add("EDIT", l.cfg.LastName, edit, 0, 102, 134, 326, 30, idName)
-	l.pass = add("EDIT", "", edit|esPassword, 0, 102, 174, 326, 30, idPass)
-	btn := child | wsTabStop
-	l.loginBtn = add("BUTTON", "登录", btn|bsDefPush, 0, 102, 222, 140, 36, idLogin)
-	l.registerBtn = add("BUTTON", "注册", btn|bsPush, 0, 254, 222, 140, 36, idRegister)
-	l.status = add("STATIC", "输入账号密码后登录，或直接注册。", child|ssLeft, 0, 30, 274, 400, 26, idStatus)
-
-	for _, h := range []windows.HWND{l.title, l.sub, l.labels[0], l.labels[1], l.labels[2], l.status} {
-		pSendMessageW.Call(uintptr(h), wmSetFont, uintptr(l.font), 1)
+	l.banner = add("STATIC", "", child|ssBitmap|ssCenterImage, 0, 20, 16, 480, 150, 1011)
+	l.bannerBmp = l.scaledBanner(l.px(480), l.px(150))
+	if l.bannerBmp != 0 {
+		pSendMessageW.Call(uintptr(l.banner), stmSetImage, uintptr(imageBitmap), uintptr(l.bannerBmp))
+	} else {
+		l.title = add("STATIC", l.manifest.Name, child|ssLeft, 0, 28, 28, 300, 44, idTitle)
+		l.sub = add("STATIC", "登录或注册后打开游戏窗口", child|ssLeft, 0, 30, 76, 380, 24, idSub)
 	}
-	pSendMessageW.Call(uintptr(l.title), wmSetFont, uintptr(l.fontBold), 1)
-	pSendMessageW.Call(uintptr(l.sub), wmSetFont, uintptr(l.fontSmall), 1)
+	l.version = add("STATIC", "v"+l.manifest.Version+" · 原生启动器", child|ssLeft, 0, 24, 176, 300, 22, 1012)
+
+	l.labels[0] = add("STATIC", "服务器", child|ssLeft, 0, 30, 207, 70, 26, idLabServer)
+	l.labels[1] = add("STATIC", "道号", child|ssLeft, 0, 30, 247, 70, 26, idLabName)
+	l.labels[2] = add("STATIC", "密码", child|ssLeft, 0, 30, 287, 70, 26, idLabPass)
+	edit := child | wsBorder | wsTabStop | esAutoHScroll
+	l.server = add("EDIT", l.cfg.Server, edit, 0, 112, 205, 380, 30, idServer)
+	l.name = add("EDIT", l.cfg.LastName, edit, 0, 112, 245, 380, 30, idName)
+	l.pass = add("EDIT", "", edit|esPassword, 0, 112, 285, 380, 30, idPass)
+	btn := child | wsTabStop
+	l.loginBtn = add("BUTTON", "登录", btn|bsDefPush, 0, 112, 332, 146, 38, idLogin)
+	l.registerBtn = add("BUTTON", "注册", btn|bsPush, 0, 346, 332, 146, 38, idRegister)
+	l.status = add("STATIC", "输入账号密码后登录，或直接注册。", child|ssLeft, 0, 30, 386, 450, 26, idStatus)
+
+	for _, h := range []windows.HWND{l.title, l.sub, l.version, l.labels[0], l.labels[1], l.labels[2], l.status} {
+		if h != 0 {
+			pSendMessageW.Call(uintptr(h), wmSetFont, uintptr(l.font), 1)
+		}
+	}
+	if l.title != 0 {
+		pSendMessageW.Call(uintptr(l.title), wmSetFont, uintptr(l.fontBold), 1)
+	}
+	if l.sub != 0 {
+		pSendMessageW.Call(uintptr(l.sub), wmSetFont, uintptr(l.fontSmall), 1)
+	}
+	pSendMessageW.Call(uintptr(l.version), wmSetFont, uintptr(l.fontSmall), 1)
 	pSendMessageW.Call(uintptr(l.status), wmSetFont, uintptr(l.fontSmall), 1)
 	for _, h := range []windows.HWND{l.server, l.name, l.pass} {
 		pSendMessageW.Call(uintptr(h), wmSetFont, uintptr(l.font), 1)
@@ -330,6 +421,74 @@ func (l *launcher) buildControls() {
 	} else {
 		pSetFocus.Call(uintptr(l.name))
 	}
+}
+
+// scaledBanner 把 assets/banner.bmp 缩放到当前 DPI 的控件尺寸，返回可直接给 STATIC 的 HBITMAP。
+func (l *launcher) scaledBanner(w, h int) windows.Handle {
+	path := ""
+	for _, p := range candidatePaths(filepath.Join("assets", "banner.bmp")) {
+		if _, err := os.Stat(p); err == nil {
+			path = p
+			break
+		}
+	}
+	if path == "" || w <= 0 || h <= 0 {
+		return 0
+	}
+	src, _, _ := pLoadImageW.Call(0, uintptr(unsafe.Pointer(mustUTF16(path))),
+		imageBitmap, 0, 0, lrLoadFile|lrCreatedib)
+	if src == 0 {
+		return 0
+	}
+	screenDC, _, _ := pGetDC.Call(0)
+	srcDC, _, _ := pCreateCompatibleDC.Call(screenDC)
+	dstDC, _, _ := pCreateCompatibleDC.Call(screenDC)
+	dst, _, _ := pCreateCompatibleBitmap.Call(screenDC, uintptr(w), uintptr(h))
+	if srcDC == 0 || dstDC == 0 || dst == 0 {
+		if srcDC != 0 {
+			pDeleteDC.Call(srcDC)
+		}
+		if dstDC != 0 {
+			pDeleteDC.Call(dstDC)
+		}
+		if dst != 0 {
+			pDeleteObject.Call(dst)
+		}
+		pDeleteObject.Call(src)
+		pReleaseDC.Call(0, screenDC)
+		return 0
+	}
+	oldSrc, _, _ := pSelectObject.Call(srcDC, src)
+	oldDst, _, _ := pSelectObject.Call(dstDC, dst)
+	pStretchBlt.Call(dstDC, 0, 0, uintptr(w), uintptr(h), srcDC, 0, 0, 960, 300, srcCopy)
+	pSelectObject.Call(srcDC, oldSrc)
+	pSelectObject.Call(dstDC, oldDst)
+	pDeleteDC.Call(srcDC)
+	pDeleteDC.Call(dstDC)
+	pDeleteObject.Call(src)
+	pReleaseDC.Call(0, screenDC)
+	return windows.Handle(dst)
+}
+
+func (l *launcher) loadIcon() {
+	path := ""
+	for _, p := range candidatePaths(filepath.Join("assets", "icon.ico")) {
+		if _, err := os.Stat(p); err == nil {
+			path = p
+			break
+		}
+	}
+	if path == "" {
+		return
+	}
+	h, _, _ := pLoadImageW.Call(0, uintptr(unsafe.Pointer(mustUTF16(path))),
+		imageIcon, 0, 0, lrLoadFile|lrDefaultSize)
+	if h == 0 {
+		return
+	}
+	l.icon = windows.Handle(h)
+	pSendMessageW.Call(uintptr(l.hwnd), wmSetIcon, 1, h)
+	pSendMessageW.Call(uintptr(l.hwnd), wmSetIcon, 0, h)
 }
 
 func (l *launcher) center() {
@@ -356,6 +515,11 @@ func launcherWndProc(hwnd uintptr, msg uint32, wparam, lparam uintptr) uintptr {
 		pFillRect.Call(wparam, uintptr(unsafe.Pointer(&r)), uintptr(l.bgBrush))
 		return 1
 	case wmCtlColorStatic:
+		if l.banner != 0 && windows.HWND(lparam) == l.banner {
+			// 位图 Static 不能铺实心背景，否则会盖住横幅。
+			nullBrush, _, _ := pGetStockObject.Call(5) // NULL_BRUSH
+			return nullBrush
+		}
 		pSetBkMode.Call(wparam, transparent)
 		if l.statusBad && windows.HWND(lparam) == l.status {
 			pSetTextColor.Call(wparam, uintptr(color(232, 120, 110)))
@@ -391,6 +555,10 @@ func launcherWndProc(hwnd uintptr, msg uint32, wparam, lparam uintptr) uintptr {
 		pDestroyWindow.Call(hwnd)
 		return 0
 	case wmDestroy:
+		if l.bannerBmp != 0 {
+			pDeleteObject.Call(uintptr(l.bannerBmp))
+			l.bannerBmp = 0
+		}
 		pPostQuitMessage.Call(0)
 		return 0
 	}
@@ -446,7 +614,7 @@ func (l *launcher) finishAuth(res authOutcome) {
 	saveConfig(cfg)
 	l.setStatus("登录成功，正在打开游戏…", false)
 
-	game, err := gamePath()
+	game, err := gamePath(l.manifest.Game)
 	if err != nil {
 		l.setStatus(err.Error(), true)
 		return
@@ -467,19 +635,26 @@ func (l *launcher) finishAuth(res authOutcome) {
 	pDestroyWindow.Call(uintptr(l.hwnd))
 }
 
-func gamePath() (string, error) {
+func gamePath(rel string) (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return "", errors.New("找不到启动器路径")
 	}
-	cand := filepath.Join(filepath.Dir(exe), "playcli.exe")
-	if _, err := os.Stat(cand); err == nil {
-		return cand, nil
+	dir := filepath.Dir(exe)
+	cands := make([]string, 0, 4)
+	if rel != "" {
+		cands = append(cands, filepath.Join(dir, filepath.FromSlash(rel)))
+	}
+	cands = append(cands, filepath.Join(dir, "game", "playcli.exe"), filepath.Join(dir, "playcli.exe"))
+	for _, cand := range cands {
+		if _, err := os.Stat(cand); err == nil {
+			return cand, nil
+		}
 	}
 	if p, err := exec.LookPath("playcli.exe"); err == nil {
 		return p, nil
 	}
-	return "", errors.New("同目录没找到 playcli.exe，请先 make build")
+	return "", errors.New("没找到游戏本体：检查 data/manifest.json 的 game 路径，或先 make dist")
 }
 
 func (l *launcher) setStatus(text string, bad bool) {

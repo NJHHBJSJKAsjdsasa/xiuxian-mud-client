@@ -2,7 +2,7 @@
 
 ```
 doc_id: C-09
-version: 5.3.4
+version: 5.3.5
 updated: 2026-11-24
 owns: M1–M5 里程碑、每档的完成定义与依赖的协议面
 depends_on: C-01、C-02、C-05、C-08
@@ -30,6 +30,7 @@ depends_on: C-01、C-02、C-05、C-08
 | 交互打磨 | 输入行光标编辑与历史草稿、战斗目标跨局重置与跳过尸体、GUI 滚轮、离线动作提示；新增 13 项测试 |
 | 鼠标与智能选择 | 点击行选中、双击执行；断路出口自动跳过、坊市优先买得起；新增 5 项测试 |
 | 登录启动器 | 独立 `launcher.exe`：原生 Win32 登录/注册，成功后以 token 拉起 `playcli --gui`；实机验证登录→建号页 |
+| 发布目录 | `make dist` 组装启动器 + `game/playcli.exe` + assets + manifest；启动器从清单找游戏与版本 |
 | 已知边界 | 历练/突破按服务端境界限制会被拒（凡人不能在中州历练），客户端如实显示 `E-NOREALM` |
 
 **工程**：`go.mod`（websocket + term + x/sys）、`proto.go` 全部帧类型、`net.go` 握手与重连、

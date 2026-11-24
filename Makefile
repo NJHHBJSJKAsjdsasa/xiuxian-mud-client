@@ -1,7 +1,7 @@
 BIN := bin/playcli
 GOFLAGS := -trimpath
 
-.PHONY: build exe launcher test check clean
+.PHONY: build exe launcher dist test check clean
 
 # Windows 上同时产出 .exe：双击与脚本调用都要能用。
 # 改完代码就 make build，不要只跑 go test——用户要的是能直接跑的产物。
@@ -16,6 +16,10 @@ build:
 launcher:
 	CGO_ENABLED=0 go build $(GOFLAGS) -ldflags "-s -w -H=windowsgui" -o bin/launcher.exe ./cmd/launcher
 	@echo "built bin/launcher.exe"
+
+# Windows 发布目录：启动器只是入口，游戏本体与资源、清单都作为独立文件随包。
+dist: build
+	python packaging/build_dist.py
 
 exe: build
 
