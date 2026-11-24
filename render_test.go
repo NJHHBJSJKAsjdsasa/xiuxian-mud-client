@@ -343,10 +343,35 @@ func TestRenderHelpOverlay(t *testing.T) {
 	a := richApp()
 	a.ui.help = true
 	all := strings.Join(assertFrameWidth(t, a, 100, 30), "\n")
-	for _, want := range []string{"帮助", "行走", "私语", "装配/卸下", "i 丹药", "q 退出（按两次）"} {
+	for _, want := range []string{"帮助", "行走", "私语", "装配/卸下", "i 丹药", "q 离开菜单"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("帮助浮层缺 %q：\n%s", want, all)
 		}
+	}
+}
+
+func TestRenderQuitMenuOverlay(t *testing.T) {
+	a := richApp()
+	a.ui.quitMenu = true
+	a.ui.quitSel = 1
+	sc := a.render(100, 30)
+	all := strings.Join(sc.frame(), "\n")
+	for _, want := range []string{"离开游戏", "退出游戏", "返回登录界面", "取消", "Enter 确认"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("离开菜单缺 %q：\n%s", want, all)
+		}
+	}
+	options, cancel := 0, 0
+	for _, h := range sc.hits {
+		switch h.act.kind {
+		case hitQuitOption:
+			options++
+		case hitQuitCancel:
+			cancel++
+		}
+	}
+	if options != 3 || cancel == 0 {
+		t.Fatalf("离开菜单应有三项点击区与背景取消区：options=%d cancel=%d", options, cancel)
 	}
 }
 

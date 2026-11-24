@@ -50,6 +50,8 @@ const (
 	hitEncounter
 	hitTalk
 	hitWindowToggle
+	hitQuitOption
+	hitQuitCancel
 )
 
 type hitAction struct {

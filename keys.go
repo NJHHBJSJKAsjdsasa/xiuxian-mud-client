@@ -295,6 +295,9 @@ type uiState struct {
 	shopQty int
 	// 帮助浮层。
 	help bool
+	// q 打开的离开菜单：退出游戏 / 返回登录界面 / 取消。
+	quitMenu bool
+	quitSel  int
 	// 与人物交谈的弹层。
 	talkPick bool
 	talkSel  int
@@ -303,7 +306,7 @@ type uiState struct {
 	mapPanY int
 	// 桌面窗口模式：舆图页多显示"拖动平移"的提示。
 	desktop bool
-	// 需要按两次才执行的动作（quit / logout）与第一次按下的时刻。
+	// 需要按两次才执行的动作（logout）与第一次按下的时刻。
 	confirm   string
 	confirmAt int64
 	// 输入行的历史：↑ 翻旧、↓ 回新；草稿在离开最新端时保存。

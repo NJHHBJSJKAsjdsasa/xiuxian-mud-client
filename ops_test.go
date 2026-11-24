@@ -358,18 +358,40 @@ func TestChatHistoryRecall(t *testing.T) {
 	}
 }
 
-func TestQuitNeedsTwoPresses(t *testing.T) {
+func TestQuitMenuOpensAndEnterQuits(t *testing.T) {
 	a := richApp()
 	a.onKey(key{kind: keyRune, r: 'q'})
-	if a.quit {
-		t.Fatal("第一次按 q 不该退出")
+	if !a.ui.quitMenu || a.quit {
+		t.Fatalf("q 应打开离开菜单且不直接退出：menu=%v quit=%v", a.ui.quitMenu, a.quit)
 	}
-	if _, ok := a.ui.activeToast(); !ok {
-		t.Fatal("第一次按 q 应提示再按一次")
-	}
-	a.onKey(key{kind: keyRune, r: 'q'})
+	a.onKey(special("enter"))
 	if !a.quit {
-		t.Fatal("第二次按 q 应退出")
+		t.Fatal("菜单默认项 Enter 应退出游戏")
+	}
+}
+
+func TestQuitMenuCanReturnToLogin(t *testing.T) {
+	a := richApp()
+	a.onKey(key{kind: keyRune, r: 'q'})
+	a.onKey(special("down"))
+	a.onKey(special("enter"))
+	if a.quit {
+		t.Fatal("选择返回登录界面不该退出客户端")
+	}
+	if a.ui.view != viewLogin {
+		t.Fatalf("应回登录界面，实为 %v", a.ui.view)
+	}
+	if a.ui.quitMenu {
+		t.Fatal("执行后应关闭离开菜单")
+	}
+}
+
+func TestQuitMenuCancel(t *testing.T) {
+	a := richApp()
+	a.onKey(key{kind: keyRune, r: 'q'})
+	a.onKey(special("esc"))
+	if a.quit || a.ui.quitMenu || a.ui.view != viewMain {
+		t.Fatalf("Esc 应取消并留在主界面：quit=%v menu=%v view=%v", a.quit, a.ui.quitMenu, a.ui.view)
 	}
 }
 
@@ -385,16 +407,6 @@ func TestLogoutNeedsTwoPresses(t *testing.T) {
 	a.onKey(key{kind: keyRune, r: 'o'})
 	if a.ui.view != viewLogin {
 		t.Fatalf("第二次按 o 应回登录页，实为 %v", a.ui.view)
-	}
-}
-
-func TestQuitConfirmCancelledByOtherKey(t *testing.T) {
-	a := richApp()
-	a.onKey(key{kind: keyRune, r: 'q'})
-	a.onKey(key{kind: keyRune, r: 'c'}) // 打坐会发命令，同时也该撤销确认
-	a.onKey(key{kind: keyRune, r: 'q'})
-	if a.quit {
-		t.Fatal("中间按了别的键，再按 q 应重新计数")
 	}
 }
 
@@ -446,8 +458,8 @@ func TestHelpToggle(t *testing.T) {
 	if a.ui.help {
 		t.Fatal("q 应收起帮助")
 	}
-	if a.quit {
-		t.Fatal("收起帮助不该退出程序")
+	if a.quit || a.ui.quitMenu {
+		t.Fatal("收起帮助不该退出程序或打开离开菜单")
 	}
 }
 

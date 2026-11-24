@@ -44,6 +44,9 @@ func (a *app) render(w, h int) *screen {
 		sc.addHit(0, 0, sc.w, sc.h, hitAction{hitHelpClose, 0})
 	}
 	drawToast(sc, &a.ui)
+	if a.ui.quitMenu && a.ui.view == viewMain {
+		drawQuitMenu(sc, a.ui.quitSel)
+	}
 	return sc
 }
 
@@ -611,10 +614,10 @@ func (a *app) drawHint(sc *screen, y int) {
 	case a.st.battle != nil:
 		keys = "a 普攻   s 技能   i 丹药   f 逃   ↑↓/1–9 选目标   PgUp 战报"
 	case sc.w >= 100:
-		keys = "Space 历练   c 打坐   b 突破   l 四周   / 说话   ? 帮助   F1–F8 页面   [ ] 翻页   q 退出"
+		keys = "Space 历练   c 打坐   b 突破   l 四周   / 说话   ? 帮助   F1–F8 页面   [ ] 翻页   q 菜单"
 	default:
 		// 窄屏只留最常用的：宁可少写几个键，也不要"…"截断让人以为坏了。
-		keys = "Space 历练   c 打坐   b 突破   / 说话   ? 帮助   F1–F8 页面   q 退出"
+		keys = "Space 历练   c 打坐   b 突破   / 说话   ? 帮助   F1–F8 页面   q 菜单"
 	}
 	sc.put(1, y, truncateWidth(keys, sc.w-2), fg(colFaint))
 }
@@ -999,6 +1002,45 @@ func drawEncounter(sc *screen, e *eventView) {
 	sc.put(ix, y+h-2, "按 1–"+itoa(len(e.Options))+" 选择", fg(colFaint))
 }
 
+// drawQuitMenu 离开菜单：q 打开，退出游戏 / 返回登录界面 / 取消。
+func drawQuitMenu(sc *screen, sel int) {
+	w, h := 42, 8
+	if w > sc.w-4 {
+		w = sc.w - 4
+	}
+	if h > sc.h-2 {
+		h = sc.h - 2
+	}
+	if w < 20 || h < 6 {
+		return
+	}
+	rowFill(sc, 0, 1, sc.w, sc.h-1)
+	sc.addHit(0, 0, sc.w, sc.h, hitAction{hitQuitCancel, 0})
+	x := (sc.w - w) / 2
+	y := (sc.h - h) / 2
+	if x < 1 {
+		x = 1
+	}
+	if y < 1 {
+		y = 1
+	}
+	box(sc, x, y, w, h, "离开游戏", true)
+	ix, iw := boxInner(x, w)
+	options := []string{"退出游戏", "返回登录界面", "取消"}
+	for i, label := range options {
+		ry := y + 2 + i
+		line := fmt.Sprintf("%d  %s", i+1, label)
+		st := fg(colText)
+		if i == sel {
+			row(sc, ix, ry, iw, fgBg(colBG, colAccent))
+			st = fgBg(colBG, colAccent)
+		}
+		sc.put(ix, ry, truncateWidth(line, iw), st)
+		sc.addHit(ix, ry, iw, 1, hitAction{hitQuitOption, i})
+	}
+	sc.put(ix, y+h-2, "↑↓ 选择   Enter 确认   Esc 返回", fg(colFaint))
+}
+
 // drawTalk 交谈弹层：列出当前节点的人物，↑↓ 选、数字直选。
 func drawTalk(sc *screen, m *mapView, sel int) {
 	if m == nil || len(m.NPCs) == 0 {
@@ -1059,7 +1101,7 @@ func drawHelp(sc *screen) {
 		{"技能", "↑↓ 选择    Enter 装配/卸下"},
 		{"坊市", "↑↓ 选择    +/- 数量    Enter 买入"},
 		{"战斗", "↑↓ / 1–9 选目标    a 普攻    s 技能    i 丹药    f 逃"},
-		{"其他", "o 退出登录（按两次）    q 退出（按两次）    ? 收起帮助"},
+		{"其他", "o 退出登录（两次）    q 离开菜单（退出/回登录）    ? 收起帮助"},
 	}
 	w := 76
 	if w > sc.w-4 {

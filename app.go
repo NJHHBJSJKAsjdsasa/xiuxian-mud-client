@@ -390,6 +390,10 @@ func (a *app) keyMain(k key) {
 		a.keyChat(k)
 		return
 	}
+	if a.ui.quitMenu {
+		a.keyQuitMenu(k)
+		return
+	}
 	// 奇遇是模态：只认数字键，别让别的操作把它顶掉。
 	if e := a.st.encounter; e != nil && a.ui.page == pageGame {
 		a.keyEncounter(k, e)
@@ -413,16 +417,15 @@ func (a *app) keyMain(k key) {
 		return
 	}
 
-	// 退出与退出登录都要按两次：误碰一个键不该把这一局断掉。
+	// q 打开离开菜单，再选退出游戏或回登录界面。
 	if k.isRune('q') {
-		a.confirmTwice("quit", "再按一次 q 退出", func() { a.quit = true })
+		a.ui.quitMenu = true
+		a.ui.quitSel = 0
+		a.ui.confirm = ""
 		return
 	}
-	// 按了别的键就撤销待确认（q 已在上面返回）。判据要按键分：
-	// 一律清空的话，第二次 o 会先把自己刚立的确认抹掉，永远退不出去。
-	if a.ui.confirm == "quit" {
-		a.ui.confirm = ""
-	}
+	// 按了别的键就撤销待确认（o 的判据按键分：一律清空会让第二次 o
+	// 先抹掉自己刚立的确认，永远退不出去）。
 	if a.ui.confirm == "logout" && !k.isRune('o') {
 		a.ui.confirm = ""
 	}
@@ -538,6 +541,37 @@ func (a *app) talkTo(i int) {
 		return
 	}
 	a.act(actTalk, map[string]any{"npc": npc.ID})
+}
+
+func (a *app) keyQuitMenu(k key) {
+	switch {
+	case k.is("esc"), k.isRune('q'), k.isRune('3'):
+		a.ui.quitMenu = false
+	case k.is("up"), k.isRune('k'):
+		a.ui.quitSel = (a.ui.quitSel + 2) % 3
+	case k.is("down"), k.isRune('j'), k.is("tab"):
+		a.ui.quitSel = (a.ui.quitSel + 1) % 3
+	case k.is("enter"), k.is("space"):
+		a.chooseQuitMenu()
+	case k.isRune('1'):
+		a.ui.quitSel = 0
+		a.chooseQuitMenu()
+	case k.isRune('2'):
+		a.ui.quitSel = 1
+		a.chooseQuitMenu()
+	}
+}
+
+func (a *app) chooseQuitMenu() {
+	switch a.ui.quitSel {
+	case 0:
+		a.ui.quitMenu = false
+		a.quit = true
+	case 1:
+		a.intentLogout()
+	default:
+		a.ui.quitMenu = false
+	}
 }
 
 // confirmTwice 两段确认：第一次只提示，2.5 秒内再按一次才执行。
@@ -982,6 +1016,15 @@ func (a *app) mouseClick(col, row int, activate bool) {
 		if !activate {
 			a.toggleWindowFrame()
 		}
+	case hitQuitOption:
+		if !activate && act.index >= 0 && act.index < 3 {
+			a.ui.quitSel = act.index
+			a.chooseQuitMenu()
+		}
+	case hitQuitCancel:
+		if !activate {
+			a.ui.quitMenu = false
+		}
 	}
 }
 
@@ -1395,6 +1438,8 @@ func (a *app) intentLogout() {
 	a.ui.page = pageGame
 	a.ui.typing = false
 	a.ui.help = false
+	a.ui.quitMenu = false
+	a.ui.quitSel = 0
 	a.ui.chatTo = ""
 }
 

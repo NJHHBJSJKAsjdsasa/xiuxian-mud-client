@@ -2,7 +2,7 @@
 
 ```
 doc_id: C-02
-version: 5.3.0
+version: 5.3.1
 updated: 2026-11-24
 owns: 技术选型、依赖、分层、目录结构、并发模型、模块依赖规则
 depends_on: C-01、C-03、C-04、C-05
@@ -73,7 +73,7 @@ client/
 ├── packaging/       发布目录组装脚本与 README
 ├── docs/            设计文档（本目录）
 ├── tools/doc-check.py  文档自查
-└── *_test.go        140 项单测
+└── *_test.go        142 项单测
 ```
 
 ## 4. 并发模型
