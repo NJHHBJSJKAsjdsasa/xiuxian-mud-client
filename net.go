@@ -36,6 +36,7 @@ type netCmd struct {
 	server   string
 	name     string
 	pass     string
+	token    string
 	register bool
 	action   string
 	data     any
@@ -229,13 +230,20 @@ func runNet(cmds <-chan netCmd, evs chan<- netEvent) {
 				return
 			}
 		}
-		send(evStatus{connStatus{kind: connLoggingIn}})
-
-		auth, err := login(first.server, first.name, first.pass, first.register)
-		if err != nil {
-			send(evErr{code: errAuth, msg: err.Error()})
-			send(evStatus{connStatus{kind: connIdle}})
-			continue
+		var auth authResult
+		if first.token != "" {
+			// 启动器已经用密码换过 token：不再走 REST 登录，直接把 token 拿去握手。
+			auth.Token = first.token
+			send(evStatus{connStatus{kind: connConnecting}})
+		} else {
+			send(evStatus{connStatus{kind: connLoggingIn}})
+			var err error
+			auth, err = login(first.server, first.name, first.pass, first.register)
+			if err != nil {
+				send(evErr{code: errAuth, msg: err.Error()})
+				send(evStatus{connStatus{kind: connIdle}})
+				continue
+			}
 		}
 
 		attempt := 0

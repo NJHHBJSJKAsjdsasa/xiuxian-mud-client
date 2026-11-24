@@ -11,7 +11,10 @@ Windows 上双击 exe 默认打开**原生桌面窗口**：同一块字符屏由
 支持 DPI 感知、鼠标拖动舆图与最小 80×24 格；`--tui` 强制终端界面，`--gui` 强制窗口。
 核心仍是终端网格，没有第二套布局。
 
-单二进制、无渲染后端、无资源目录：`go build` 完直接在终端里铺满，SSH 上去也能玩。
+Windows 还带一个独立启动器 `bin/launcher.exe`：原生 Win32 登录/注册窗口，成功后自动启动
+`playcli.exe --gui`；令牌通过 `XIUXIAN_TOKEN` 环境变量交接，密码不进入命令行。
+
+游戏本体单二进制、无渲染后端、无资源目录：`go build` 完直接在终端里铺满，SSH 上去也能玩。
 界面的每个字符都由自己画——没有 TUI 框架，也没有 WebView。
 
 理由见 `docs/01-SCOPE.md` §2：这个游戏的玩法是读文字、看格子地图、敲指令，
@@ -52,7 +55,7 @@ Windows 桌面窗口（DPI 感知、鼠标拖舆图、双击/`0` 回中、滚轮
 
 - 分层：`proto`（协议） / `net`（连接） / `state`（状态） / `app`（交互） / `render`（绘制） /
   `gui`（Windows 原生窗口，非 Windows 为空实现）。
-- `go vet ./...` 干净，`go test ./...` 133 项全绿（含"每行宽度恰好等于终端宽"的逐字符断言）。
+- `go vet ./...` 干净，`go test ./...` 134 项全绿（含"每行宽度恰好等于终端宽"的逐字符断言）。
 - 协议以服务端 `docs/05-PROTOCOL.md` 为准，接入流程看 `docs/12-API.md`。
 
 ## 怎么跑
@@ -62,8 +65,9 @@ Windows 桌面窗口（DPI 感知、鼠标拖舆图、双击/`0` 回中、滚轮
 cd ../xianxia && go run ./cmd/server
 
 # 客户端（需要 80×24 以上终端）
-make build                                  # 同时产出 bin/playcli 与 bin/playcli.exe
-./bin/playcli.exe --server ws://127.0.0.1:8080
+make build                                  # 产出 bin/playcli(.exe) 与 bin/launcher.exe
+./bin/launcher.exe                          # Windows：原生登录/注册窗口，成功后打开游戏
+./bin/playcli.exe --server ws://127.0.0.1:8080  # 也可以直接开游戏（带内置登录页）
 # 双击 exe 默认开桌面窗口；--tui 强制终端，--gui 强制窗口
 # 不用 make 时：go build -o bin/playcli.exe .
 

@@ -78,6 +78,14 @@ func (a *app) autoLogin(name, pass string) {
 	a.pendingLogin = &loginAttempt{name: name, pass: pass}
 }
 
+// autoToken 用启动器换来的 token 直接连；密码不落到命令行。
+func (a *app) autoToken(server, token string) {
+	a.ui.login.server = server
+	a.ui.login.loading = true
+	a.ui.login.syncCursors()
+	a.send(netCmd{kind: cmdLogin, server: server, token: token})
+}
+
 func (a *app) autoCreate(name string) { a.pendingCreate = name }
 
 func (a *app) autoMove(i int) { a.pendingMove = &i }

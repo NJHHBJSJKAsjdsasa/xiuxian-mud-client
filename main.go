@@ -29,6 +29,7 @@ import (
 type args struct {
 	server   string
 	login    string
+	token    string
 	create   string
 	page     string
 	move     int
@@ -48,6 +49,7 @@ func parseArgs() args {
 	var a args
 	flag.StringVar(&a.server, "server", "", "服务端地址，如 ws://127.0.0.1:8080")
 	flag.StringVar(&a.login, "login", "", "道号:密码，跳过登录页")
+	flag.StringVar(&a.token, "token", "", "登录令牌（启动器用；也可用 XIUXIAN_TOKEN 环境变量）")
 	flag.StringVar(&a.create, "create", "", "登录后自动建号")
 	flag.StringVar(&a.page, "page", "", "起始页：game|character|bag|skills|social|market|sect|map|settings")
 	flag.IntVar(&a.move, "move", 0, "进主界面后自动走第 n 个出口（从 0 起）")
@@ -89,7 +91,13 @@ func main() {
 	}
 
 	a := newApp(cfg)
-	if argv.login != "" {
+	token := argv.token
+	if token == "" {
+		token = os.Getenv("XIUXIAN_TOKEN")
+	}
+	if token != "" {
+		a.autoToken(cfg.Server, token)
+	} else if argv.login != "" {
 		if name, pass, ok := strings.Cut(argv.login, ":"); ok {
 			a.autoLogin(name, pass)
 		} else {

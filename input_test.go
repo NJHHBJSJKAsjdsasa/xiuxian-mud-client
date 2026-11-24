@@ -187,6 +187,19 @@ func TestFirstAliveFoeTarget(t *testing.T) {
 	}
 }
 
+func TestAutoTokenQueuesConnect(t *testing.T) {
+	a := testApp()
+	a.autoToken("ws://127.0.0.1:8080", "tok-123")
+	select {
+	case c := <-a.cmds:
+		if c.kind != cmdLogin || c.token != "tok-123" || c.server == "" {
+			t.Fatalf("token 启动应入队 cmdLogin+token，实际 %+v", c)
+		}
+	default:
+		t.Fatal("token 启动应立刻入队")
+	}
+}
+
 func TestSubmitLoginIgnoredWhileLoading(t *testing.T) {
 	a := testApp()
 	a.ui.view = viewLogin

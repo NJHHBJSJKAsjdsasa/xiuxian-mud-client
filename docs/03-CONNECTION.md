@@ -2,7 +2,7 @@
 
 ```
 doc_id: C-03
-version: 4.1.2
+version: 4.1.3
 updated: 2026-11-24
 owns: 登录流程、协议版本握手、心搏、重连状态机、关闭码处置、终端生命周期
 depends_on: 服务端 05（P-REST-01/02、P-MSG-01/05、关闭码表）、12（快速开始）
@@ -36,6 +36,12 @@ depends_on: 服务端 05（P-REST-01/02、P-MSG-01/05、关闭码表）、12（�
 - 登录页与主界面是**同一屏的两个页面**（`viewLogin / viewCreate / viewMain / viewFatal`），不反复进出备用屏。
 - 登录中的按钮进入 loading 态（禁点 + 转圈），请求 8 秒超时后恢复可点并显示原因。
 - `ready.serverNow` 用来算时钟偏移：`offset = serverNow - nowMs()`，之后所有倒计时都用服务端时间。
+
+### 1.1 启动器 token 直连
+
+Windows 的 `launcher.exe` 先走同一套 REST 登录/注册，成功后启动 `playcli.exe --gui`，
+把 token 放在 `XIUXIAN_TOKEN` 环境变量里。`playcli` 读到 token 就**跳过登录页与 REST**，
+直接 `hello` 握手；token 失效（4003/关闭码不可重试）仍回登录页。密码不进入命令行、不写盘。
 
 ## 2. 协议版本（4004）
 
