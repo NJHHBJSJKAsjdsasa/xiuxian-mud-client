@@ -2,7 +2,7 @@
 
 ```
 doc_id: C-02
-version: 5.4.1
+version: 5.4.2
 updated: 2026-11-24
 owns: 技术选型、依赖、分层、目录结构、并发模型、模块依赖规则
 depends_on: C-01、C-03、C-04、C-05
@@ -91,7 +91,7 @@ client/
   `game/gamehost.dll`（宿主启动即 `FreeConsole`），宿主用 `LoadLibrary` 加载同目录
   `game/playcli.dll` 并调用导出的 `RunGame`；token 走 `XIUXIAN_TOKEN` 环境变量，密码不进入命令行。
   启动器同时把自身路径写入 `XIUXIAN_LAUNCHER`；游戏里选“返回登录窗口”时关闭游戏并重启该启动器，
-  没有该变量时回退到游戏内登录页。不可重连关闭（4001/4003/4004 等）发 `evClosed`：有启动器路径时关闭游戏并重开启动器，否则切 `viewFatal`。发布包唯一的 exe 是登录启动器，游戏宿主与本体都是 DLL。
+  没有该变量时回退到游戏内登录页。不可重连关闭（4001/4003/4004 等）发 `evClosed`：有启动器路径时关闭游戏并重开启动器，否则切 `viewFatal`。踢人公告里的 GM 理由经 `XIUXIAN_KICK_REASON` 交给启动器提示框。发布包唯一的 exe 是登录启动器，游戏宿主与本体都是 DLL。
   启动器不设 `HideWindow`，它会让宿主第一次 `ShowWindow` 被强制成 `SW_HIDE`；拉起后轮询
   子进程的可见 `JiuzhouWenDao` 窗口，窗口可见才退出，进程提前退出或超时则保留启动器报错。
 - **桌面窗口**：GUI 线程 `runtime.LockOSThread` 跑 Win32 消息循环，250ms `WM_TIMER`

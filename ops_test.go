@@ -628,12 +628,13 @@ func TestTalkWithoutNpcToasts(t *testing.T) {
 func TestClosedSessionShowsFatalWithoutLauncher(t *testing.T) {
 	a := richApp()
 	a.launcherPath = ""
+	a.handleEvent(evAnnounce{text: "你已被移出此界：测试理由"})
 	a.handleEvent(evClosed{code: 4003, reason: "banned", msg: "登录已过期"})
 	if a.ui.view == viewLogin {
 		t.Fatal("被踢下线不应回到游戏内登录页")
 	}
-	if a.ui.view != viewFatal || !strings.Contains(a.ui.fatal, "移出此界") {
-		t.Fatalf("应显示被踢断开页，实际 view=%v fatal=%q", a.ui.view, a.ui.fatal)
+	if a.ui.view != viewFatal || !strings.Contains(a.ui.fatal, "测试理由") {
+		t.Fatalf("应显示带 GM 理由的断开页，实际 view=%v fatal=%q", a.ui.view, a.ui.fatal)
 	}
 	if got := sessionEndNotice(4001, "evicted", "x"); !strings.Contains(got, "别处登录") {
 		t.Fatalf("顶号提示错误：%q", got)

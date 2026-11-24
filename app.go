@@ -29,6 +29,8 @@ type app struct {
 
 	// 由启动器拉起时，退出到登录窗口需要重新打开的原生启动器路径。
 	launcherPath string
+	// 服务端踢人公告里的理由，close 事件到达后带给启动器提示框。
+	kickReason string
 
 	submitAt      int64
 	pendingLogin  *loginAttempt
@@ -172,8 +174,16 @@ func (a *app) handleEvent(ev netEvent) {
 		a.ui.help = false
 		a.ui.talkPick = false
 		a.st.clearSession()
+		kickReason := ""
 		notice := sessionEndNotice(e.code, e.reason, e.msg)
-		if a.returnToLauncher(notice) {
+		if e.code == 4003 && e.reason == "banned" {
+			kickReason = strings.TrimSpace(a.kickReason)
+			if kickReason == "" {
+				kickReason = "管理员未填写理由"
+			}
+			notice = "你已被移出此界：" + kickReason
+		}
+		if a.returnToLauncher(notice, kickReason) {
 			return
 		}
 		a.ui.fatal = notice
@@ -259,6 +269,9 @@ func (a *app) handleEvent(ev netEvent) {
 		}
 	case evAnnounce:
 		a.addLogs([]logLine{{K: "sys", S: "【公告】" + e.text}})
+		if strings.HasPrefix(e.text, "你已被移出此界：") {
+			a.kickReason = strings.TrimSpace(strings.TrimPrefix(e.text, "你已被移出此界："))
+		}
 	case evEvent:
 		a.st.encounter = e.e
 		// 奇遇是模态：帮助与交谈弹层让位，免得盖住选项。
@@ -367,6 +380,7 @@ func (a *app) submitLogin() {
 	a.cfg.Server = server
 	a.cfg.LastName = name
 	a.cfg.save()
+	a.kickReason = ""
 	a.submitAt = nowMs()
 	a.ui.login.loading = true
 	a.ui.login.err = ""
@@ -496,7 +510,7 @@ func (a *app) keyMain(k key) {
 		a.openTalk()
 	case k.isRune('o'):
 		a.confirmTwice("logout", "再按一次 o 退出登录", func() {
-			if !a.returnToLauncher("") {
+			if !a.returnToLauncher("", "") {
 				a.intentLogout()
 			}
 		})
@@ -591,7 +605,7 @@ func (a *app) chooseQuitMenu() {
 		a.ui.quitMenu = false
 		a.quit = true
 	case 1:
-		if a.returnToLauncher("") {
+		if a.returnToLauncher("", "") {
 			return
 		}
 		a.intentLogout()
@@ -629,7 +643,7 @@ func relauncherPath() string {
 
 // returnToLauncher 关闭游戏并重新拉起独立启动器；直接运行游戏时返回 false，
 // 由调用方回退到游戏内登录页。
-func (a *app) returnToLauncher(notice string) bool {
+func (a *app) returnToLauncher(notice, kickReason string) bool {
 	if a.launcherPath == "" {
 		return false
 	}
@@ -647,6 +661,9 @@ func (a *app) returnToLauncher(notice string) bool {
 	}
 	if notice != "" {
 		env = append(env, "XIUXIAN_NOTICE="+notice)
+	}
+	if kickReason != "" {
+		env = append(env, "XIUXIAN_KICK_REASON="+kickReason)
 	}
 	cmd.Env = env
 	if err := cmd.Start(); err != nil {

@@ -457,8 +457,16 @@ func main() {
 	if notice := strings.TrimSpace(os.Getenv("XIUXIAN_NOTICE")); notice != "" {
 		l.setStatus(notice, true)
 	}
+	kickReason := strings.TrimSpace(os.Getenv("XIUXIAN_KICK_REASON"))
 	pShowWindow.Call(hwnd, swShow)
 	pUpdateWindow.Call(hwnd)
+	if kickReason != "" {
+		body := "你已被移出此界。\n\n管理员理由：" + kickReason
+		if kickReason == "管理员未填写理由" {
+			body = "你已被移出此界。\n\n管理员未填写理由。"
+		}
+		messageBox(body)
+	}
 
 	var msg wMsg
 	for {
@@ -907,7 +915,8 @@ func (l *launcher) startGame(token, server string) error {
 		if !strings.HasPrefix(kv, "XIUXIAN_TOKEN=") &&
 			!strings.HasPrefix(kv, "XIUXIAN_SERVER=") &&
 			!strings.HasPrefix(kv, "XIUXIAN_LAUNCHER=") &&
-			!strings.HasPrefix(kv, "XIUXIAN_NOTICE=") {
+			!strings.HasPrefix(kv, "XIUXIAN_NOTICE=") &&
+			!strings.HasPrefix(kv, "XIUXIAN_KICK_REASON=") {
 			env = append(env, kv)
 		}
 	}
