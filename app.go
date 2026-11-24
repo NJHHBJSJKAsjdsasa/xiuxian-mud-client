@@ -579,22 +579,34 @@ func (a *app) startChat() {
 // 认不出的 / 开头只提示，不当成普通发言发出去——免得把命令喊给全服看。
 func (a *app) sendChatInput() {
 	raw := strings.TrimSpace(a.ui.chatText)
-	a.ui.chatText = ""
-	a.ui.chatCur = 0
-	a.ui.typing = false
 	if raw == "" {
+		a.ui.chatText = ""
+		a.ui.chatCur = 0
+		a.ui.typing = false
 		return
 	}
 	// 中文输入法常把斜杠与 at 打成全角，这里统一半角。
 	raw = strings.NewReplacer("／", "/", "＠", "@").Replace(raw)
+	if raw == "/help" || raw == "/?" {
+		a.ui.chatText = ""
+		a.ui.chatCur = 0
+		a.ui.typing = false
+		a.ui.help = true
+		return
+	}
+	if !a.online() {
+		// 保留输入与输入态：重连后按 Enter 还能再发，不必重敲一遍。
+		a.ui.toast("未连接，消息未发送；重连后再按 Enter", true)
+		return
+	}
+	a.ui.chatText = ""
+	a.ui.chatCur = 0
+	a.ui.typing = false
 
 	switch {
 	case strings.HasPrefix(raw, "//"):
 		// 双斜杠强制当普通发言：想喊一句"任务"又不触发指令时用。
 		a.sendChannel(raw[2:])
-		return
-	case raw == "/help", raw == "/?":
-		a.ui.help = true
 		return
 	case strings.HasPrefix(raw, "/w "), strings.HasPrefix(raw, "/W "):
 		name, text := splitFirst(strings.TrimSpace(raw[3:]))
@@ -1058,6 +1070,10 @@ func (a *app) moveExit(d int) {
 // enterExit 前往选中出口。走不了要说清楚为什么——
 // 之前按 Enter 没反应，玩家只会以为客户端卡了。
 func (a *app) enterExit() {
+	if !a.online() {
+		a.ui.toast("未连接，无法赶路；正在重连…", false)
+		return
+	}
 	if a.st.player != nil && a.st.player.Travel != nil {
 		a.ui.toast("正在赶路，到了再说", true)
 		return
@@ -1271,6 +1287,10 @@ func (a *app) keyBattle(k key, b *battleView) {
 
 // battleAct 轮到自己才发动作；否则只提示，免得白吃一条 E-BUSY。
 func (a *app) battleAct(b *battleView, data map[string]any) {
+	if !a.online() {
+		a.ui.toast("未连接，无法出手；正在重连…", false)
+		return
+	}
 	if b.State != "" && b.State != "player" {
 		a.ui.toast("等对方出手…", false)
 		return

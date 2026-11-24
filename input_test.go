@@ -148,6 +148,35 @@ func TestBattleTargetCycleKeys(t *testing.T) {
 	}
 }
 
+func TestChatOfflineKeepsDraft(t *testing.T) {
+	a := testApp()
+	a.st.conn = connStatus{kind: connOffline, detail: "断线"}
+	a.ui.typing = true
+	a.ui.chatText, a.ui.chatCur = "半条命令", 4
+	a.sendChatInput()
+	if a.ui.chatText != "半条命令" || a.ui.chatCur != 4 || !a.ui.typing {
+		t.Fatalf("离线发送应保留草稿与输入态，实际 %q/%d/%v", a.ui.chatText, a.ui.chatCur, a.ui.typing)
+	}
+	if len(a.ui.toasts) == 0 {
+		t.Fatal("离线发送应提示")
+	}
+}
+
+func TestOfflineMoveAndBattleSpeak(t *testing.T) {
+	a := testApp()
+	a.st.conn = connStatus{kind: connOffline, detail: "断线"}
+	a.enterExit()
+	a.battleAct(&battleView{State: "player"}, map[string]any{"op": "attack", "target": 1})
+	if len(a.ui.toasts) < 2 {
+		t.Fatalf("离线赶路/出手都应有提示，实际 toast=%d", len(a.ui.toasts))
+	}
+	select {
+	case c := <-a.cmds:
+		t.Fatalf("离线时不应发动作：%+v", c)
+	default:
+	}
+}
+
 func TestFirstAliveFoeTarget(t *testing.T) {
 	b := &battleView{Foes: []foeView{{I: 1, Dead: true}, {I: 3, Dead: false}}}
 	if got := firstAliveFoeTarget(b); got != 3 {
