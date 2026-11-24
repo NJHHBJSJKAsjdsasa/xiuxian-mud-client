@@ -49,6 +49,7 @@ const (
 	hitHelpClose
 	hitEncounter
 	hitTalk
+	hitWindowToggle
 )
 
 type hitAction struct {

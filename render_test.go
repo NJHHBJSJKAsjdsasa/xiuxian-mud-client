@@ -258,12 +258,20 @@ func TestSecondFrameSkipsUnchangedLines(t *testing.T) {
 func TestRenderSettingsPageContent(t *testing.T) {
 	a := testApp()
 	a.ui.page = pageSettings
-	all := strings.Join(a.render(100, 30).frame(), "\n")
-	for _, want := range []string{"服务器", "协议", "连接", "配置", "playcli.json"} {
+	a.ui.desktop = true
+	sc := a.render(100, 30)
+	all := strings.Join(sc.frame(), "\n")
+	for _, want := range []string{"服务器", "协议", "连接", "配置", "playcli.json", "窗口", "无边框"} {
 		if !strings.Contains(all, want) {
 			t.Errorf("设置页缺 %q", want)
 		}
 	}
+	for _, h := range sc.hits {
+		if h.act.kind == hitWindowToggle {
+			return
+		}
+	}
+	t.Fatal("设置页没有窗口切换的点击区")
 }
 
 func TestRenderBattleBox(t *testing.T) {

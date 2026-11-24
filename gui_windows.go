@@ -87,6 +87,8 @@ const (
 	wmLButtonDbl  = 0x0203
 
 	wsOverlappedWindow = 0x00CF0000
+	wsPopup            = 0x80000000
+	wsExAppWindow      = 0x00040000
 	swHide             = 0
 	swShow             = 5
 	cwUseDefault       = uintptr(0x80000000)
@@ -161,14 +163,15 @@ type guiApp struct {
 	lastW    int
 	lastH    int
 
-	dragging  bool
-	dragX     int
-	dragY     int
-	dragPanX  int
-	dragPanY  int
-	resizing  bool
-	skipSpace bool
-	highSurf  uint16
+	dragging   bool
+	dragX      int
+	dragY      int
+	dragPanX   int
+	dragPanY   int
+	resizing   bool
+	skipSpace  bool
+	highSurf   uint16
+	borderless bool
 }
 
 var (
@@ -195,7 +198,7 @@ func runGUI(a *app, _ config) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
-	gui = &guiApp{app: a}
+	gui = &guiApp{app: a, borderless: a.cfg.borderless()}
 	if err := gui.initFonts(); err != nil {
 		return err
 	}
@@ -213,16 +216,18 @@ func runGUI(a *app, _ config) error {
 		return fmt.Errorf("注册窗口类失败：%v", err)
 	}
 
+	style := gui.windowStyle()
+	// WS_POPUP 默认不进任务栏；补 WS_EX_APPWINDOW，Alt+Tab 与任务栏仍能找到游戏。
+	exStyle := uintptr(wsExAppWindow)
 	var rc windows.Rect
 	rc.Right = int32(110 * gui.cellW)
 	rc.Bottom = int32(34 * gui.cellH)
-	procAdjustWindowRectEx.Call(uintptr(unsafe.Pointer(&rc)),
-		uintptr(wsOverlappedWindow), 0, 0)
+	procAdjustWindowRectEx.Call(uintptr(unsafe.Pointer(&rc)), style, 0, 0)
 
 	hwnd, _, err := procCreateWindowExW.Call(
-		0, uintptr(unsafe.Pointer(guiClass)),
+		exStyle, uintptr(unsafe.Pointer(guiClass)),
 		uintptr(unsafe.Pointer(mustUTF16("九州问道"))),
-		uintptr(wsOverlappedWindow),
+		style,
 		cwUseDefault, cwUseDefault,
 		uintptr(rc.Right-rc.Left), uintptr(rc.Bottom-rc.Top),
 		0, 0, hInst, 0)
@@ -230,6 +235,7 @@ func runGUI(a *app, _ config) error {
 		return fmt.Errorf("创建窗口失败：%v", err)
 	}
 	gui.hwnd = windows.HWND(hwnd)
+	a.applyWindowMode = gui.setBorderless
 	gui.centerWindow()
 
 	// 定时器先建：失败时窗口直接销毁并回退 TUI，此时控制台还没藏。
@@ -269,6 +275,45 @@ func runGUI(a *app, _ config) error {
 func loadCursor() windows.Handle {
 	r, _, _ := procLoadCursorW.Call(0, 32512) // IDC_ARROW
 	return windows.Handle(r)
+}
+
+func (g *guiApp) windowStyle() uintptr {
+	if g.borderless {
+		return wsPopup
+	}
+	return wsOverlappedWindow
+}
+
+func (g *guiApp) computeMinSize() {
+	var minRc windows.Rect
+	minRc.Right = int32(80 * g.cellW)
+	minRc.Bottom = int32(24 * g.cellH)
+	procAdjustWindowRectEx.Call(uintptr(unsafe.Pointer(&minRc)), g.windowStyle(), 0, 0)
+	g.minW = minRc.Right - minRc.Left
+	g.minH = minRc.Bottom - minRc.Top
+}
+
+// setBorderless 只换窗口样式，保留客户区尺寸与位置。
+func (g *guiApp) setBorderless(borderless bool) {
+	if g.hwnd == 0 || g.borderless == borderless {
+		return
+	}
+	var rc windows.Rect
+	procGetClientRect.Call(uintptr(g.hwnd), uintptr(unsafe.Pointer(&rc)))
+	clientW, clientH := rc.Right, rc.Bottom
+	g.borderless = borderless
+	// 只换外框位，保留 WS_VISIBLE 等状态位；整值覆盖会把窗口一起隐藏。
+	oldStyle, _, _ := procGetWindowLongW.Call(uintptr(g.hwnd), gwlStyle)
+	style := (oldStyle & 0xFFFFFFFF) &^ uintptr(wsOverlappedWindow|wsPopup)
+	style |= g.windowStyle()
+	procSetWindowLongW.Call(uintptr(g.hwnd), gwlStyle, style)
+	g.computeMinSize()
+	outer := windows.Rect{Right: clientW, Bottom: clientH}
+	procAdjustWindowRectEx.Call(uintptr(unsafe.Pointer(&outer)), g.windowStyle(), 0, 0)
+	procSetWindowPos.Call(uintptr(g.hwnd), 0, 0, 0,
+		uintptr(outer.Right-outer.Left), uintptr(outer.Bottom-outer.Top),
+		uintptr(swpNoMove|swpNoZOrder|swpNoActivate|swpFrameChange))
+	procInvalidateRect.Call(uintptr(g.hwnd), 0, 1)
 }
 
 func (g *guiApp) enforceMinSize() {
@@ -333,13 +378,7 @@ func (g *guiApp) initFonts() error {
 		return errors.New("字体度量异常")
 	}
 	// 窗口最少 80×24 格（C-05 的最小终端），否则右侧与见闻会被裁掉。
-	var minRc windows.Rect
-	minRc.Right = int32(80 * g.cellW)
-	minRc.Bottom = int32(24 * g.cellH)
-	procAdjustWindowRectEx.Call(uintptr(unsafe.Pointer(&minRc)),
-		uintptr(wsOverlappedWindow), 0, 0)
-	g.minW = minRc.Right - minRc.Left
-	g.minH = minRc.Bottom - minRc.Top
+	g.computeMinSize()
 	return nil
 }
 

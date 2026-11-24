@@ -165,9 +165,10 @@ type wClassEx struct {
 }
 
 type config struct {
-	Server   string `json:"server"`
-	LastName string `json:"lastName"`
-	Color    string `json:"color"`
+	Server     string `json:"server"`
+	LastName   string `json:"lastName"`
+	Color      string `json:"color"`
+	WindowMode string `json:"windowMode,omitempty"`
 }
 
 type manifest struct {

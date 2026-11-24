@@ -10,10 +10,20 @@ import (
 
 const defaultServer = "ws://127.0.0.1:8080"
 
+const (
+	windowModeBorderless = "borderless"
+	windowModeWindowed   = "windowed"
+)
+
 type config struct {
-	Server   string `json:"server"`
-	LastName string `json:"lastName"`
-	Color    string `json:"color"`
+	Server     string `json:"server"`
+	LastName   string `json:"lastName"`
+	Color      string `json:"color"`
+	WindowMode string `json:"windowMode,omitempty"`
+}
+
+func (c config) borderless() bool {
+	return c.WindowMode != windowModeWindowed
 }
 
 func configPath() string {

@@ -946,7 +946,23 @@ func (a *app) drawSettings(sc *screen, x, y, w, h int) {
 	kv(sc, x, y+1, 10, "协议", fmt.Sprintf("v%d   角色 %s   日志 %d 行", protoVersion, hasChar, a.st.logs.len()), fg(colText))
 	kv(sc, x, y+2, 10, "连接", a.st.conn.badgeText(), fg(colText))
 	kv(sc, x, y+3, 10, "配置", configPath(), fg(colText))
-	sc.put(x, y+5, "退出登录：Esc 回主界面后按 o（只退出账号，不退出客户端）", fg(colFaint))
+	mode := "无边框（只留游戏界面）"
+	if !a.cfg.borderless() {
+		mode = "带边框（可拖动与缩放）"
+	}
+	hint := "Space 切换"
+	if a.ui.desktop {
+		hint = "Space / 点击切换"
+	}
+	kv(sc, x, y+4, 10, "窗口", mode+"   "+hint, fg(colText))
+	hitW := 58
+	if hitW > w {
+		hitW = w
+	}
+	if hitW > 0 {
+		sc.addHit(x, y+4, hitW, 1, hitAction{kind: hitWindowToggle})
+	}
+	sc.put(x, y+6, "退出登录：Esc 回主界面后按 o（只退出账号，不退出客户端）", fg(colFaint))
 }
 
 // drawEncounter 奇遇三选一：居中弹层，数字键选。

@@ -2,7 +2,7 @@
 
 ```
 doc_id: C-03
-version: 4.1.3
+version: 4.1.4
 updated: 2026-11-24
 owns: 登录流程、协议版本握手、心搏、重连状态机、关闭码处置、终端生命周期
 depends_on: 服务端 05（P-REST-01/02、P-MSG-01/05、关闭码表）、12（快速开始）
@@ -12,7 +12,7 @@ depends_on: 服务端 05（P-REST-01/02、P-MSG-01/05、关闭码表）、12（�
 
 ```
 启动
- ├─ 读 playcli.json（server / lastName / color）
+ ├─ 读 playcli.json（server / lastName / color / windowMode）
  ├─ 进备用屏（alternate screen），画登录页
  └─ 登录页等待输入（密码不落盘，不自动恢复 WS）
         │

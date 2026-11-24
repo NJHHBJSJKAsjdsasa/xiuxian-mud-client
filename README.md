@@ -7,9 +7,9 @@
 
 **Go 写的终端程序（TUI），不是网页。**
 
-Windows 上双击 exe 默认打开**原生桌面窗口**：同一块字符屏由 GDI 双缓冲绘制，
-支持 DPI 感知、鼠标拖动舆图与最小 80×24 格；`--tui` 强制终端界面，`--gui` 强制窗口。
-核心仍是终端网格，没有第二套布局。
+Windows 上双击 exe 默认打开**无边框桌面窗口**：只显示游戏客户区，同一块字符屏由 GDI 双缓冲绘制，
+支持 DPI 感知、鼠标拖动舆图与最小 80×24 格；F8 设置里的“窗口”行可切回带边框窗口。
+`--tui` 强制终端界面，`--gui` 强制窗口。核心仍是终端网格，没有第二套布局。
 
 Windows 还带一个独立启动器 `bin/launcher.exe`：原生 Win32 登录/注册窗口；成功后启动
 `game/gamehost.exe`，宿主再加载 `game/playcli.dll`；令牌通过 `XIUXIAN_TOKEN` 环境变量交接，
@@ -50,13 +50,13 @@ Windows 还带一个独立启动器 `bin/launcher.exe`：原生 Win32 登录/注
 **M1 已落地，M2 的战斗与奇遇也接上了**（2026-11-23）：登录 / 建号 / 仪表盘主界面 /
 见闻 / 路标移动（含赶路倒计时）/ 打坐 / 突破 / 探索 / 舆图 / F1–F8 数据页，
 以及背包使用与装备、技能装配、坊市买入、战斗面板、奇遇弹层，全部在终端里跑通。
-Windows 桌面窗口（DPI 感知、鼠标拖舆图、双击/`0` 回中、滚轮翻页）已接入并实机验证；
-输入行支持光标编辑与历史草稿，战斗目标不会跨局/选到尸体；
+Windows 桌面窗口（DPI 感知、默认无边框、鼠标拖舆图、双击/`0` 回中、滚轮翻页）已接入并实机验证；
+F8 设置可切换无边框 / 带边框并即时生效；输入行支持光标编辑与历史草稿，战斗目标不会跨局/选到尸体；
 桌面窗口可单击选中、双击执行，默认出口自动跳过断路。
 
 - 分层：`proto`（协议） / `net`（连接） / `state`（状态） / `app`（交互） / `render`（绘制） /
   `gui`（Windows 原生窗口，非 Windows 为空实现）。
-- `go vet ./...` 干净，`go test ./...` 135 项全绿（含"每行宽度恰好等于终端宽"的逐字符断言）。
+- `go vet ./...` 干净，`go test ./...` 136 项全绿（含"每行宽度恰好等于终端宽"的逐字符断言）。
 - 协议以服务端 `docs/05-PROTOCOL.md` 为准，接入流程看 `docs/12-API.md`。
 
 ## 怎么跑
@@ -69,7 +69,8 @@ cd ../xianxia && go run ./cmd/server
 make build                                  # 产出 bin/playcli(.exe) 与 bin/launcher.exe
 ./bin/launcher.exe                          # Windows：原生登录/注册窗口，成功后打开游戏
 ./bin/playcli.exe --server ws://127.0.0.1:8080  # 也可以直接开游戏（带内置登录页）
-# 双击 exe 默认开桌面窗口；--tui 强制终端，--gui 强制窗口
+# 双击 exe 默认开无边框桌面窗口；--tui 强制终端，--gui 强制窗口
+# F8 → 设置 → 窗口：Space/点击切换无边框与带边框
 # 不用 make 时：go build -o bin/playcli.exe .
 
 # 跳过登录页；还没有角色时自动建号
@@ -102,7 +103,7 @@ dist/九州问道/
 启动器从 `data/manifest.json` 找游戏与版本、加载 `assets/`；成功后用 `XIUXIAN_TOKEN`
 启动 `game/gamehost.exe`，宿主加载 `game/playcli.dll`。Go DLL 只依赖系统
 `KERNEL32` / UCRT，不需要额外运行库 DLL。打包需要 MSYS2 的 `gcc`（`make dist` 会自动编 DLL 与宿主）。
-个人配置仍在 `%APPDATA%/xiuxian-client/playcli.json`。
+个人配置仍在 `%APPDATA%/xiuxian-client/playcli.json`，窗口模式写在 `windowMode`。
 启动器只用 `CREATE_NO_WINDOW` 拉起宿主，宿主启动即 `FreeConsole`；不设 `HideWindow`，
 否则宿主第一次 `ShowWindow` 会被强制成隐藏，游戏窗口存在但看不见。登录成功后启动器会等
 子进程的 `JiuzhouWenDao` 窗口真正可见才退出；双击启动器不会多出命令行黑窗。
@@ -123,7 +124,7 @@ dist/九州问道/
 | `/` | 说话（`Enter` 送出，`Tab` 换频道，`↑↓` 历史，`Esc` 取消） |
 | `?` | 帮助浮层 |
 | `[` `]` | 前后翻数据页 |
-| `F1`–`F8` | 角色 / 背包 / 技能 / 江湖 / 坊市 / 宗门 / 舆图 / 设置 |
+| `F1`–`F8` | 角色 / 背包 / 技能 / 江湖 / 坊市 / 宗门 / 舆图 / 设置（含窗口边框） |
 | `PgUp` `PgDn` `Home` `End` | 翻见闻 |
 | `Esc` | 从数据页返回 |
 | `o` | 退出登录（按两次） |

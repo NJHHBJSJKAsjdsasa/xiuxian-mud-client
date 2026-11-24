@@ -34,6 +34,9 @@ type app struct {
 	// 下一次允许补拉舆图的时刻（毫秒）。赶路中服务端会拒 worldMap（E-BUSY），
 	// 拒了就等一会儿再要，否则地名会一直停在出发地。
 	mapRetryAt int64
+
+	// 桌面窗口就绪后由 GUI 注入；TUI 里为 nil。
+	applyWindowMode func(borderless bool)
 }
 
 type loginAttempt struct{ name, pass string }
@@ -806,6 +809,29 @@ func (a *app) keyPage(k key) {
 		case k.isRune('0'):
 			a.ui.mapPanX, a.ui.mapPanY = 0, 0
 		}
+	case pageSettings:
+		if k.is("space") || k.is("enter") || k.isRune('w') {
+			a.toggleWindowFrame()
+		}
+	}
+}
+
+func (a *app) toggleWindowFrame() {
+	if a.cfg.borderless() {
+		a.cfg.WindowMode = windowModeWindowed
+	} else {
+		a.cfg.WindowMode = windowModeBorderless
+	}
+	a.cfg.save()
+	if a.applyWindowMode == nil {
+		a.ui.toast("窗口设置已保存：桌面窗口下次启动生效", false)
+		return
+	}
+	a.applyWindowMode(a.cfg.borderless())
+	if a.cfg.borderless() {
+		a.ui.toast("窗口边框已关闭：只留游戏界面", false)
+	} else {
+		a.ui.toast("窗口边框已开启：可拖动与缩放", false)
 	}
 }
 
@@ -951,6 +977,10 @@ func (a *app) mouseClick(col, row int, activate bool) {
 					a.battleAct(a.st.battle, map[string]any{"op": "attack", "target": act.index})
 				}
 			}
+		}
+	case hitWindowToggle:
+		if !activate {
+			a.toggleWindowFrame()
 		}
 	}
 }
