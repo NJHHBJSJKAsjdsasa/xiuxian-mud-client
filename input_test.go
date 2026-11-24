@@ -216,3 +216,104 @@ func contains(s, sub string) bool {
 	}
 	return false
 }
+
+func findHit(a *app, kind hitKind) (hitRegion, bool) {
+	if a.scr == nil {
+		return hitRegion{}, false
+	}
+	for _, r := range a.scr.hits {
+		if r.act.kind == kind {
+			return r, true
+		}
+	}
+	return hitRegion{}, false
+}
+
+func TestScreenHitAt(t *testing.T) {
+	sc := newScreen(10, 5)
+	sc.addHit(2, 1, 3, 2, hitAction{hitExit, 7})
+	if act, ok := sc.hitAt(2, 1); !ok || act.kind != hitExit || act.index != 7 {
+		t.Fatalf("命中区左上有误：%+v/%v", act, ok)
+	}
+	if _, ok := sc.hitAt(4, 2); !ok {
+		t.Fatal("命中区右下应包含")
+	}
+	if _, ok := sc.hitAt(5, 2); ok {
+		t.Fatal("命中区外不应命中")
+	}
+	sc.reset()
+	if _, ok := sc.hitAt(2, 1); ok {
+		t.Fatal("reset 应清空命中区")
+	}
+}
+
+func TestSmartExitSelection(t *testing.T) {
+	a := testApp()
+	a.st.world.Exits[0].OK = false
+	a.ui.selectedExit = 0
+	a.smartExitSelection()
+	if a.ui.selectedExit != 1 {
+		t.Fatalf("死路应自动跳到第一条可走出口 1，实际 %d", a.ui.selectedExit)
+	}
+}
+
+func TestMouseClickBagAndActivate(t *testing.T) {
+	a := testApp()
+	a.st.player.Bag = append(a.st.player.Bag, bagItem{ID: "herb2", N: 1, Name: "凝血草", Kind: "herb", Sell: 6})
+	a.ui.page = pageBag
+	a.render(100, 30)
+	r, ok := findHit(a, hitBagItem)
+	if !ok {
+		t.Fatal("背包页没有登记可点行")
+	}
+	a.mouseClick(r.x, r.y, false)
+	if a.ui.selOf(pageBag) != r.act.index {
+		t.Fatalf("单击应选中第 %d 行，实际 %d", r.act.index, a.ui.selOf(pageBag))
+	}
+	a.mouseClick(r.x, r.y, true)
+	select {
+	case c := <-a.cmds:
+		if c.action != actUse && c.action != actEquip {
+			t.Fatalf("双击应执行使用/装备，实际 %s", c.action)
+		}
+	default:
+		t.Fatal("双击应发出动作")
+	}
+}
+
+func TestMouseClickExit(t *testing.T) {
+	a := testApp()
+	a.render(100, 30)
+	r, ok := findHit(a, hitExit)
+	if !ok {
+		t.Fatal("主界面没有登记出口行")
+	}
+	a.mouseClick(r.x, r.y, false)
+	if a.ui.selectedExit != r.act.index {
+		t.Fatalf("单击应选中出口 %d，实际 %d", r.act.index, a.ui.selectedExit)
+	}
+	a.mouseClick(r.x, r.y, true)
+	select {
+	case c := <-a.cmds:
+		if c.action != actMove {
+			t.Fatalf("双击应发 move，实际 %s", c.action)
+		}
+	default:
+		t.Fatal("双击应发出移动动作")
+	}
+}
+
+func TestMouseClickLoginField(t *testing.T) {
+	a := testApp()
+	a.ui.view = viewLogin
+	a.ui.login.focus = 1
+	a.render(80, 24)
+	r, ok := findHit(a, hitLoginField)
+	if !ok {
+		t.Fatal("登录页没有登记输入框命中区")
+	}
+	a.mouseClick(r.x, r.y, false)
+	if a.ui.login.focus != r.act.index {
+		t.Fatalf("点击应聚焦字段 %d，实际 %d", r.act.index, a.ui.login.focus)
+	}
+}

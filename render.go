@@ -41,6 +41,7 @@ func (a *app) render(w, h int) *screen {
 	}
 	if a.ui.help && a.ui.view == viewMain && a.st.encounter == nil {
 		drawHelp(sc)
+		sc.addHit(0, 0, sc.w, sc.h, hitAction{hitHelpClose, 0})
 	}
 	drawToast(sc, &a.ui)
 	return sc
@@ -75,6 +76,9 @@ func drawLogin(sc *screen, ui *uiState) {
 	fieldRow(sc, ix, rowY, iw, "服务器", l.server, l.serverCur, l.focus == 0, "ws://127.0.0.1:8080")
 	fieldRow(sc, ix, rowY+1, iw, "道号", l.name, l.nameCur, l.focus == 1, "2–8 个字符")
 	fieldRow(sc, ix, rowY+2, iw, "密码", maskPass(l.pass), l.passCur, l.focus == 2, "6–32 个字符")
+	sc.addHit(ix, rowY, iw, 1, hitAction{hitLoginField, 0})
+	sc.addHit(ix, rowY+1, iw, 1, hitAction{hitLoginField, 1})
+	sc.addHit(ix, rowY+2, iw, 1, hitAction{hitLoginField, 2})
 	rowY += 4
 
 	mode := "登录"
@@ -86,6 +90,8 @@ func drawLogin(sc *screen, ui *uiState) {
 	bx = sc.put(bx, rowY, btn, fgBg(colBG, colAccent))
 	sc.put(bx, rowY, "]", fg(colAccent))
 	sc.put(bx+3, rowY, "Ctrl+R 切登录/注册", fg(colFaint))
+	sc.addHit(ix, rowY, bx+1-ix, 1, hitAction{hitLoginButton, 0})
+	sc.addHit(bx+3, rowY, 18, 1, hitAction{hitRegisterToggle, 0})
 	if l.loading {
 		sc.put(ix+20, rowY, "连接中…", fg(colWarn))
 	}
@@ -152,6 +158,7 @@ func drawCreate(sc *screen, ui *uiState) {
 	sc.put(ix, y+2, "踏入凡界", fgBold(colAccent))
 	sc.put(ix, y+3, "测灵石摆在案上，还空着。", fg(colDim))
 	fieldRow(sc, ix, y+5, iw, "道号", ui.createName, ui.createCur, true, "2–8 个字符")
+	sc.addHit(ix, y+5, iw, 1, hitAction{hitCreateField, 0})
 	sc.put(ix, y+7, "Enter 落笔   Ctrl+C 退出", fg(colFaint))
 }
 
@@ -333,6 +340,8 @@ func (a *app) drawExitsBox(sc *screen, x, y, w, h int) {
 	title := "去处"
 	if traveling {
 		title = "去处 · 赶路中"
+	} else if a.ui.desktop {
+		title = "去处 · 单击选 / 双击走"
 	}
 	box(sc, x, y, w, h, title, a.ui.page == pageGame && !traveling)
 	ix, iw := boxInner(x, w)
@@ -399,6 +408,7 @@ func (a *app) drawExitsBox(sc *screen, x, y, w, h int) {
 			sc.put(ix+textWidth(line)+1, y+1+i, strings.Repeat("·", n), fg(colFaint))
 		}
 		sc.put(ix+iw-textWidth(cost)-1, y+1+i, cost, st)
+		sc.addHit(ix, y+1+i, iw, 1, hitAction{hitExit, idx})
 	}
 }
 
@@ -464,6 +474,7 @@ func (a *app) drawBattleBox(sc *screen, x, y, w, h int) {
 		}
 		sc.put(barX, rowY, gauge(f.HP, maxi(f.MaxHP, 1), barW), fg(colBad))
 		sc.put(ix+iw-vv, rowY, val, st)
+		sc.addHit(ix, rowY, iw, 1, hitAction{hitFoe, idx})
 		rowY++
 	}
 
@@ -803,6 +814,7 @@ func (a *app) drawBag(sc *screen, x, y, w, h int) {
 			st = fgBg(colBG, colAccent)
 		}
 		tableRow(sc, x, ry, []string{name, itoa64(it.N), kindName(it.Kind), itoa64(it.Sell)}, widths, st)
+		sc.addHit(x, ry, w, 1, hitAction{hitBagItem, idx})
 	}
 }
 
@@ -852,6 +864,7 @@ func (a *app) drawSkills(sc *screen, x, y, w, h int) {
 			name = "▸ " + name
 		}
 		tableRow(sc, x, ry, []string{name, itoa64(sk.MP), fmt.Sprintf("%.1f", sk.Power), state}, widths, st)
+		sc.addHit(x, ry, w, 1, hitAction{hitSkillItem, idx})
 	}
 }
 
@@ -897,6 +910,7 @@ func (a *app) drawMarket(sc *screen, x, y, w, h int) {
 		tableRow(sc, x, ry, []string{
 			name, kindName(it.Kind), itoa64(it.Price), itoa64(int64(it.Min)),
 		}, widths, st)
+		sc.addHit(x, ry, w, 1, hitAction{hitShopItem, idx})
 	}
 	it := items[sel]
 	desc := it.Desc
@@ -964,6 +978,7 @@ func drawEncounter(sc *screen, e *eventView) {
 		}
 		line := fmt.Sprintf("%d  %s", i+1, opt.Text)
 		sc.put(ix, y+2+i, truncateWidth(line, iw), fg(colText))
+		sc.addHit(ix, y+2+i, iw, 1, hitAction{hitEncounter, i})
 	}
 	sc.put(ix, y+h-2, "按 1–"+itoa(len(e.Options))+" 选择", fg(colFaint))
 }
@@ -1011,6 +1026,7 @@ func drawTalk(sc *screen, m *mapView, sel int) {
 			st = fgBg(colBG, colAccent)
 		}
 		sc.put(ix, ry, truncateWidth(line, iw), st)
+		sc.addHit(ix, ry, iw, 1, hitAction{hitTalk, i})
 	}
 	sc.put(ix, y+h-2, "↑↓ 选   Enter 说话   Esc 不说", fg(colFaint))
 }

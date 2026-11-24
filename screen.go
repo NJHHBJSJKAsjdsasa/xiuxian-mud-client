@@ -34,12 +34,40 @@ type cell struct {
 	st style
 }
 
+type hitKind int
+
+const (
+	hitExit hitKind = iota
+	hitBagItem
+	hitSkillItem
+	hitShopItem
+	hitFoe
+	hitLoginField
+	hitLoginButton
+	hitRegisterToggle
+	hitCreateField
+	hitHelpClose
+	hitEncounter
+	hitTalk
+)
+
+type hitAction struct {
+	kind  hitKind
+	index int
+}
+
+type hitRegion struct {
+	x, y, w, h int
+	act        hitAction
+}
+
 type screen struct {
 	w, h  int
 	buf   []cell
 	prev  []uint64 // 上一帧每行内容签名：没变的行不重写
 	prevW int
 	prevH int
+	hits  []hitRegion
 }
 
 func newScreen(w, h int) *screen {
@@ -63,6 +91,25 @@ func (s *screen) reset() {
 	for i := range s.buf {
 		s.buf[i] = cell{ch: ' ', st: st}
 	}
+	s.hits = s.hits[:0]
+}
+
+// addHit 登记一个可点区域（字符格坐标）；后登记的优先命中。
+func (s *screen) addHit(x, y, w, h int, act hitAction) {
+	if w <= 0 || h <= 0 {
+		return
+	}
+	s.hits = append(s.hits, hitRegion{x: x, y: y, w: w, h: h, act: act})
+}
+
+func (s *screen) hitAt(x, y int) (hitAction, bool) {
+	for i := len(s.hits) - 1; i >= 0; i-- {
+		r := s.hits[i]
+		if x >= r.x && x < r.x+r.w && y >= r.y && y < r.y+r.h {
+			return r.act, true
+		}
+	}
+	return hitAction{}, false
 }
 
 // bgAt 取某格当前的底色，用于"只写前景色时沿用面板色"。

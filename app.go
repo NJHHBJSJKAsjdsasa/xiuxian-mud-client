@@ -49,6 +49,11 @@ func newApp(cfg config) *app {
 		evs:  evs,
 	}
 	a.ui.login.name = cfg.LastName
+	if a.ui.login.name == "" {
+		a.ui.login.focus = 1
+	} else {
+		a.ui.login.focus = 2 // 有上次道号时直接落到密码，少按一次 Tab
+	}
 	a.ui.login.syncCursors()
 	go runNet(cmds, evs)
 	return a
@@ -164,6 +169,7 @@ func (a *app) handleEvent(ev netEvent) {
 			}
 		}
 	case evState:
+		a.ensurePageSelection()
 		// 战斗开始/奇遇出现之后服务端也会补一条 state，这里不能清战斗盒与弹层：
 		// 战斗结束靠 over=true 的 battle 帧，奇遇靠玩家选完主动收起。
 		moved := a.st.player != nil && a.st.player.Loc != e.p.Loc
@@ -196,6 +202,7 @@ func (a *app) handleEvent(ev netEvent) {
 		// 都不该把玩家刚选好的去处打回第一项。
 		if e.m.Loc != oldLoc {
 			a.ui.selectedExit = 0
+			a.smartExitSelection()
 			// 换了节点就重新居中：还留着上一个节点的平移会让人找不到自己。
 			a.ui.mapPanX, a.ui.mapPanY = 0, 0
 		}
@@ -417,15 +424,18 @@ func (a *app) keyMain(k key) {
 	if k.kind == keySpecial {
 		if p, ok := pageFromFn(k.name); ok {
 			a.ui.page = p
+			a.ensurePageSelection()
 			return
 		}
 	}
 	switch {
 	case k.isRune(']'):
 		a.cyclePage(1)
+		a.ensurePageSelection()
 		return
 	case k.isRune('['):
 		a.cyclePage(-1)
+		a.ensurePageSelection()
 		return
 	}
 
@@ -787,6 +797,152 @@ func (a *app) keyPage(k key) {
 			a.intentLook()
 		case k.isRune('0'):
 			a.ui.mapPanX, a.ui.mapPanY = 0, 0
+		}
+	}
+}
+
+// firstOKExit 返回第一条可走出口；全被挡住时返回 0 给"看原因"。
+func (a *app) firstOKExit() int {
+	if a.st.world == nil {
+		return 0
+	}
+	for i, ex := range a.st.world.Exits {
+		if ex.OK {
+			return i
+		}
+	}
+	return 0
+}
+
+// smartExitSelection 让默认选中落在可走的路线上，而不是第一条断路。
+func (a *app) smartExitSelection() {
+	if a.st.world == nil || len(a.st.world.Exits) == 0 {
+		a.ui.selectedExit = 0
+		return
+	}
+	sel := a.ui.selectedExit
+	if sel < 0 || sel >= len(a.st.world.Exits) || !a.st.world.Exits[sel].OK {
+		a.ui.selectedExit = a.firstOKExit()
+	}
+}
+
+// affordableShop 判断当前货物按 1 件是否买得起、阶位够不够。
+func (a *app) affordableShop(i int) bool {
+	items := a.shopList()
+	p := a.st.player
+	if p == nil || i < 0 || i >= len(items) {
+		return false
+	}
+	it := items[i]
+	return p.Stage >= it.Min && p.Stones >= it.Price
+}
+
+// ensurePageSelection 在进入/刷新数据页时夹住光标；坊市优先落到买得起的货上。
+func (a *app) ensurePageSelection() {
+	switch a.ui.page {
+	case pageBag:
+		if n := len(a.bagItems()); n > 0 {
+			a.ui.setSel(pageBag, clampInt(a.ui.selOf(pageBag), 0, n-1))
+		}
+	case pageSkills:
+		if n := len(a.skillList()); n > 0 {
+			a.ui.setSel(pageSkills, clampInt(a.ui.selOf(pageSkills), 0, n-1))
+		}
+	case pageMarket:
+		items := a.shopList()
+		if len(items) == 0 {
+			a.ui.setSel(pageMarket, 0)
+			return
+		}
+		sel := clampInt(a.ui.selOf(pageMarket), 0, len(items)-1)
+		if !a.affordableShop(sel) {
+			for i := range items {
+				if a.affordableShop(i) {
+					sel = i
+					break
+				}
+			}
+		}
+		a.ui.setSel(pageMarket, sel)
+	}
+}
+
+// mouseClick 处理窗口点击：单击选中，双击执行（对话框/按钮单击即执行）。
+func (a *app) mouseClick(col, row int, activate bool) {
+	if a.scr == nil {
+		return
+	}
+	act, ok := a.scr.hitAt(col, row)
+	if !ok {
+		return
+	}
+	switch act.kind {
+	case hitHelpClose:
+		if !activate {
+			a.ui.help = false
+		}
+	case hitLoginField:
+		if a.ui.view == viewLogin && act.index >= 0 && act.index < 3 {
+			a.ui.login.setFocus(act.index)
+		}
+	case hitLoginButton:
+		if !activate && a.ui.view == viewLogin {
+			a.submitLogin()
+		}
+	case hitRegisterToggle:
+		if !activate && a.ui.view == viewLogin {
+			a.ui.login.register = !a.ui.login.register
+			a.ui.login.err = ""
+		}
+	case hitCreateField:
+		if a.ui.view == viewCreate {
+			a.ui.createCur = len([]rune(a.ui.createName))
+		}
+	case hitEncounter:
+		if !activate {
+			a.chooseEncounter(act.index)
+		}
+	case hitTalk:
+		if !activate && a.ui.talkPick {
+			a.talkTo(act.index)
+		}
+	case hitExit:
+		if a.ui.view == viewMain && a.ui.page == pageGame && a.st.battle == nil &&
+			a.st.world != nil && act.index >= 0 && act.index < len(a.st.world.Exits) {
+			a.ui.selectedExit = act.index
+			if activate {
+				a.enterExit()
+			}
+		}
+	case hitBagItem:
+		if a.ui.page == pageBag && act.index >= 0 && act.index < len(a.bagItems()) {
+			a.ui.setSel(pageBag, act.index)
+			if activate {
+				a.useSelectedBag(false)
+			}
+		}
+	case hitSkillItem:
+		if a.ui.page == pageSkills && act.index >= 0 && act.index < len(a.skillList()) {
+			a.ui.setSel(pageSkills, act.index)
+			if activate {
+				a.toggleSelectedSkill()
+			}
+		}
+	case hitShopItem:
+		if a.ui.page == pageMarket && act.index >= 0 && act.index < len(a.shopList()) {
+			a.ui.setSel(pageMarket, act.index)
+			if activate {
+				a.buySelected()
+			}
+		}
+	case hitFoe:
+		if a.st.battle != nil {
+			if f := a.foeByIndex(act.index); f != nil && !f.Dead {
+				a.ui.target = act.index
+				if activate {
+					a.battleAct(a.st.battle, map[string]any{"op": "attack", "target": act.index})
+				}
+			}
 		}
 	}
 }
@@ -1431,8 +1587,12 @@ func (a *app) keyEncounter(k key, e *eventView) {
 	if k.kind != keyRune || digitOf(k.r) == 0 {
 		return
 	}
-	i := digitOf(k.r) - 1
-	if i >= len(e.Options) {
+	a.chooseEncounter(digitOf(k.r) - 1)
+}
+
+func (a *app) chooseEncounter(i int) {
+	e := a.st.encounter
+	if e == nil || i < 0 || i >= len(e.Options) {
 		return
 	}
 	a.act(actEncounter, map[string]any{"key": e.Options[i].Key})

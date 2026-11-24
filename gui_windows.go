@@ -411,7 +411,7 @@ func guiWndProc(hwnd uintptr, msg uint32, wparam, lparam uintptr) uintptr {
 		gui.onLButtonUp()
 		return 0
 	case wmLButtonDbl:
-		gui.onDblClick()
+		gui.onDblClick(lparam)
 		return 0
 	case wmClose:
 		procDestroyWindow.Call(hwnd)
@@ -690,15 +690,23 @@ func mouseXY(lparam uintptr) (int, int) {
 	return int(int16(lparam & 0xFFFF)), int(int16((lparam >> 16) & 0xFFFF))
 }
 
+func (g *guiApp) cellAt(lparam uintptr) (int, int) {
+	x, y := mouseXY(lparam)
+	return x / g.cellW, y / g.cellH
+}
+
 func (g *guiApp) onLButtonDown(lparam uintptr) {
-	if !g.mapActive() {
+	if g.mapActive() {
+		x, y := mouseXY(lparam)
+		g.dragging = true
+		g.dragX, g.dragY = x, y
+		g.dragPanX, g.dragPanY = g.app.ui.mapPanX, g.app.ui.mapPanY
+		procSetCapture.Call(uintptr(g.hwnd))
 		return
 	}
-	x, y := mouseXY(lparam)
-	g.dragging = true
-	g.dragX, g.dragY = x, y
-	g.dragPanX, g.dragPanY = g.app.ui.mapPanX, g.app.ui.mapPanY
-	procSetCapture.Call(uintptr(g.hwnd))
+	col, row := g.cellAt(lparam)
+	g.app.mouseClick(col, row, false)
+	procInvalidateRect.Call(uintptr(g.hwnd), 0, 0)
 }
 
 // wheelKey 把滚轮方向翻成日志/列表用的翻页键。
@@ -736,10 +744,12 @@ func (g *guiApp) onLButtonUp() {
 	procReleaseCapture.Call()
 }
 
-func (g *guiApp) onDblClick() {
-	if !g.mapActive() {
-		return
+func (g *guiApp) onDblClick(lparam uintptr) {
+	if g.mapActive() {
+		g.app.ui.mapPanX, g.app.ui.mapPanY = 0, 0
+	} else {
+		col, row := g.cellAt(lparam)
+		g.app.mouseClick(col, row, true)
 	}
-	g.app.ui.mapPanX, g.app.ui.mapPanY = 0, 0
 	procInvalidateRect.Call(uintptr(g.hwnd), 0, 0)
 }
