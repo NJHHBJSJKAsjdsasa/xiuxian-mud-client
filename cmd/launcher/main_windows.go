@@ -51,6 +51,7 @@ var (
 	pGetWindowTextLenW      = u32.NewProc("GetWindowTextLengthW")
 	pEnableWindow           = u32.NewProc("EnableWindow")
 	pSetFocus               = u32.NewProc("SetFocus")
+	pSetForegroundWindow    = u32.NewProc("SetForegroundWindow")
 	pGetDC                  = u32.NewProc("GetDC")
 	pReleaseDC              = u32.NewProc("ReleaseDC")
 	pGetClientRect          = u32.NewProc("GetClientRect")
@@ -90,6 +91,7 @@ const (
 	wmDestroy        = 0x0002
 	wmClose          = 0x0010
 	wmEraseBkgnd     = 0x0014
+	wmKeyDown        = 0x0100
 	wmCommand        = 0x0111
 	wmCtlColorEdit   = 0x0133
 	wmCtlColorBtn    = 0x0135
@@ -104,6 +106,8 @@ const (
 	wsTabStop         = 0x00010000
 	wsCaption         = 0x00C00000
 	wsSysMenu         = 0x00080000
+	wsPopup           = 0x80000000
+	wsExDlgModalFrame = 0x00000001
 	wsMinimize        = 0x00020000
 	wsGroup           = 0x00020000
 	wsExControlParent = 0x00010000
@@ -153,6 +157,7 @@ const (
 	idRemember    = 1014
 	idLabAccount  = 1015
 	idLabRemember = 1016
+	idNoticeOK    = 1
 
 	transparent    = 1
 	defaultCharset = 1
@@ -391,6 +396,19 @@ var appUI *launcher
 var launcherClass = mustUTF16("JiuzhouLauncher")
 var launcherProc = windows.NewCallback(launcherWndProc)
 
+type noticeDialog struct {
+	hwnd  windows.HWND
+	owner windows.HWND
+	font  windows.Handle
+	bold  windows.Handle
+	bg    windows.Handle
+	panel windows.Handle
+}
+
+var noticeClass = mustUTF16("JiuzhouNotice")
+var noticeProc = windows.NewCallback(noticeWndProc)
+var noticeUI *noticeDialog
+
 func mustUTF16(s string) *uint16 {
 	p, err := windows.UTF16PtrFromString(s)
 	if err != nil {
@@ -433,7 +451,7 @@ func main() {
 		Cursor: loadCursor(), Background: l.bgBrush, ClassName: launcherClass,
 	}
 	if r, _, err := pRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc))); r == 0 {
-		messageBox("注册窗口类失败：" + err.Error())
+		messageBox(0, "注册窗口类失败："+err.Error())
 		return
 	}
 
@@ -447,7 +465,7 @@ func main() {
 		uintptr(rc.Right-rc.Left), uintptr(rc.Bottom-rc.Top),
 		0, 0, hInst, 0)
 	if hwnd == 0 {
-		messageBox("创建窗口失败：" + err.Error())
+		messageBox(0, "创建窗口失败："+err.Error())
 		return
 	}
 	l.hwnd = windows.HWND(hwnd)
@@ -461,11 +479,7 @@ func main() {
 	pShowWindow.Call(hwnd, swShow)
 	pUpdateWindow.Call(hwnd)
 	if kickReason != "" {
-		body := "你已被移出此界。\n\n管理员理由：" + kickReason
-		if kickReason == "管理员未填写理由" {
-			body = "你已被移出此界。\n\n管理员未填写理由。"
-		}
-		messageBox(body)
+		l.showNotice(kickReason)
 	}
 
 	var msg wMsg
@@ -1159,8 +1173,172 @@ func loadCursor() windows.Handle {
 	return windows.Handle(r)
 }
 
-func messageBox(text string) {
-	const mbOK, mbIconError = 0x00000000, 0x00000010
-	pMessageBoxW.Call(0, uintptr(unsafe.Pointer(mustUTF16(text))),
-		uintptr(unsafe.Pointer(mustUTF16("九州问道 · 登录"))), mbOK|mbIconError)
+func wrapNotice(text string, width int) string {
+	if width < 1 {
+		width = 1
+	}
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	var out []string
+	for _, para := range strings.Split(text, "\n") {
+		runes := []rune(para)
+		if len(runes) == 0 {
+			out = append(out, "")
+			continue
+		}
+		for len(runes) > width {
+			out = append(out, string(runes[:width]))
+			runes = runes[width:]
+		}
+		out = append(out, string(runes))
+	}
+	return strings.Join(out, "\n")
+}
+
+func (l *launcher) showNotice(reason string) {
+	if l == nil || l.hwnd == 0 || noticeUI != nil {
+		return
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "管理员未填写理由"
+	}
+	n := &noticeDialog{
+		owner: l.hwnd,
+		font:  l.font,
+		bold:  l.fontBold,
+		bg:    l.bgBrush,
+		panel: l.panelBrush,
+	}
+	noticeUI = n
+	defer func() { noticeUI = nil }()
+
+	wc := wClassEx{
+		Size: uint32(unsafe.Sizeof(wClassEx{})), Style: 0x000B,
+		WndProc: noticeProc, Instance: l.inst,
+		Cursor: loadCursor(), Background: l.bgBrush, ClassName: noticeClass,
+	}
+	pRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc)))
+
+	const clientW, clientH = 560, 320
+	rc := rect{Right: int32(l.px(clientW)), Bottom: int32(l.px(clientH))}
+	style := uintptr(wsCaption | wsSysMenu | wsPopup)
+	pAdjustWindowRect.Call(uintptr(unsafe.Pointer(&rc)), style, 0, 0)
+	outerW, outerH := int(rc.Right-rc.Left), int(rc.Bottom-rc.Top)
+	var ownerRect rect
+	pGetWindowRect.Call(uintptr(l.hwnd), uintptr(unsafe.Pointer(&ownerRect)))
+	x := int(ownerRect.Left) + (int(ownerRect.Right-ownerRect.Left)-outerW)/2
+	y := int(ownerRect.Top) + (int(ownerRect.Bottom-ownerRect.Top)-outerH)/2
+	if x < 0 {
+		x = 0
+	}
+	if y < 0 {
+		y = 0
+	}
+
+	pEnableWindow.Call(uintptr(l.hwnd), 0)
+	defer func() {
+		pEnableWindow.Call(uintptr(l.hwnd), 1)
+		pSetForegroundWindow.Call(uintptr(l.hwnd))
+	}()
+
+	hwnd, _, _ := pCreateWindowExW.Call(
+		wsExDlgModalFrame|wsExControlParent,
+		uintptr(unsafe.Pointer(noticeClass)),
+		uintptr(unsafe.Pointer(mustUTF16("九州问道 · 提示"))),
+		style,
+		uintptr(x), uintptr(y), uintptr(outerW), uintptr(outerH),
+		uintptr(l.hwnd), 0, uintptr(l.inst), 0)
+	if hwnd == 0 {
+		return
+	}
+	n.hwnd = windows.HWND(hwnd)
+
+	add := func(class, text string, style, ex uintptr, x, y, w, h, id int) windows.HWND {
+		r, _, _ := pCreateWindowExW.Call(
+			ex, uintptr(unsafe.Pointer(mustUTF16(class))),
+			uintptr(unsafe.Pointer(mustUTF16(text))), style,
+			uintptr(l.px(x)), uintptr(l.px(y)), uintptr(l.px(w)), uintptr(l.px(h)),
+			uintptr(n.hwnd), uintptr(id), uintptr(l.inst), 0)
+		return windows.HWND(r)
+	}
+	child := uintptr(wsChild | wsVisible)
+	heading := add("STATIC", "你已被移出此界", child|ssLeft, 0, 24, 20, clientW-48, 36, 0)
+	body := add("STATIC", "管理员理由：\n"+wrapNotice(reason, 26), child|ssLeft, 0, 24, 62, clientW-48, clientH-132, 0)
+	button := add("BUTTON", "确认", child|wsTabStop|bsDefPush, 0, (clientW-130)/2, clientH-56, 130, 36, idNoticeOK)
+	if heading != 0 {
+		pSendMessageW.Call(uintptr(heading), wmSetFont, uintptr(l.fontBold), 1)
+	}
+	if body != 0 {
+		pSendMessageW.Call(uintptr(body), wmSetFont, uintptr(l.font), 1)
+	}
+	if button != 0 {
+		pSendMessageW.Call(uintptr(button), wmSetFont, uintptr(l.font), 1)
+	}
+
+	pShowWindow.Call(hwnd, swShow)
+	pUpdateWindow.Call(hwnd)
+	pSetForegroundWindow.Call(hwnd)
+	if button != 0 {
+		pSetFocus.Call(uintptr(button))
+	}
+
+	var msg wMsg
+	for {
+		r, _, _ := pGetMessageW.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0)
+		if int32(r) <= 0 {
+			break
+		}
+		if r, _, _ := pIsDialogMessageW.Call(hwnd, uintptr(unsafe.Pointer(&msg))); r != 0 {
+			continue
+		}
+		pTranslateMessage.Call(uintptr(unsafe.Pointer(&msg)))
+		pDispatchMessageW.Call(uintptr(unsafe.Pointer(&msg)))
+	}
+}
+
+func noticeWndProc(hwnd uintptr, msg uint32, wparam, lparam uintptr) uintptr {
+	n := noticeUI
+	if n == nil {
+		r, _, _ := pDefWindowProcW.Call(hwnd, uintptr(msg), wparam, lparam)
+		return r
+	}
+	switch msg {
+	case wmEraseBkgnd:
+		var r rect
+		pGetClientRect.Call(hwnd, uintptr(unsafe.Pointer(&r)))
+		pFillRect.Call(wparam, uintptr(unsafe.Pointer(&r)), uintptr(n.bg))
+		return 1
+	case wmCtlColorStatic:
+		pSetBkMode.Call(wparam, transparent)
+		pSetTextColor.Call(wparam, uintptr(color(226, 226, 214)))
+		pSetBkColor.Call(wparam, uintptr(color(30, 37, 46)))
+		return uintptr(n.panel)
+	case wmCommand:
+		id := int(wparam & 0xFFFF)
+		if id == idNoticeOK || id == 2 {
+			pDestroyWindow.Call(hwnd)
+		}
+		return 0
+	case wmKeyDown:
+		if wparam == 0x1B { // Esc
+			pDestroyWindow.Call(hwnd)
+		}
+		return 0
+	case wmClose:
+		pDestroyWindow.Call(hwnd)
+		return 0
+	case wmDestroy:
+		pPostQuitMessage.Call(0)
+		return 0
+	}
+	r, _, _ := pDefWindowProcW.Call(hwnd, uintptr(msg), wparam, lparam)
+	return r
+}
+
+func messageBox(owner windows.HWND, text string) {
+	const mbOK, mbIconWarning, mbSetForeground, mbTopMost = 0x00000000, 0x00000030, 0x00010000, 0x00040000
+	pMessageBoxW.Call(uintptr(owner), uintptr(unsafe.Pointer(mustUTF16(text))),
+		uintptr(unsafe.Pointer(mustUTF16("九州问道 · 提示"))),
+		mbOK|mbIconWarning|mbSetForeground|mbTopMost)
 }
